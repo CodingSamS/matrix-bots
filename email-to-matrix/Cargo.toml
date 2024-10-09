@@ -1,0 +1,20 @@
+[package]
+name = "email-to-matrix"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde_json = { workspace = true } 
+serde = { workspace = true }
+anyhow = { workspace = true }
+futures-util = { workspace = true }
+matrix-sdk = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true }
+rand = { workspace = true }
+mailin = { workspace = true }
+retry = { workspace = true }
+aes-gcm = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+mail-parser = { workspace = true }

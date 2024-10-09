@@ -1,0 +1,7 @@
+[Service]
+Environment="RUST_LOG=info"
+ExecStart=/path/to/email-to-matrix <path to config file>
+Sockets=email-to-matrix.socket
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
