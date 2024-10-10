@@ -4,5 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = { workspace = true }
 crypto_box = { workspace = true }
-
+clap = { workspace = true }
+encrypted-message = { path = "../encrypted-message" }
+serde_json = { workspace = true }
+tokio = { workspace = true }

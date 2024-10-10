@@ -9,7 +9,7 @@ anyhow = "1.0.86"
 futures-util = "0.3.30"
 #matrix-sdk = "0.7.1"
 matrix-sdk = { git = "https://github.com/matrix-org/matrix-rust-sdk"}
-tokio = {version = "1.39.2",  features = ["macros", "rt-multi-thread"]}
+tokio = {version = "1.39.2",  features = ["macros", "rt-multi-thread", "io-std", "net"]}
 url = "2.5.2"
 rand = "0.8.5"
 mailin = "0.6.4"
@@ -19,4 +19,5 @@ log = "0.4.22"
 env_logger = "0.11.5"
 mail-parser = "0.9.3"
 crypto_box = { version = "0.9.1", features = ["chacha20"] }
+clap = { version = "4.5.20", features = ["derive"] }
 
