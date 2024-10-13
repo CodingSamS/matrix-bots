@@ -12,3 +12,5 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tokio-serde = { workspace = true }
 tokio-util = { workspace = true }
+futures = { workspace = true }
+tarpc = { workspace = true }
