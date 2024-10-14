@@ -1,10 +1,9 @@
-use anyhow::{bail, Result};
 use crypto_box::{
     aead::{Aead, OsRng},
     ChaChaBox, Nonce, PublicKey, SecretKey,
 };
 use futures::{
-    future::{self, Ready},
+    future::{self, ready, Ready},
     prelude::*,
 };
 use tarpc::{
@@ -13,12 +12,12 @@ use tarpc::{
 };
 
 #[tarpc::service]
-trait EncryptedRPCs {
+pub trait EncryptedRPCs {
     /// Receives the public key of the other side, processes it, and responds with the own one
     async fn sync_public_keys(alice_public_key: PublicKey) -> PublicKey;
 
     /// Starts up the service. sync_public_keys needs to be done beforehand
-    async fn start(encryption_key_ciphertext: Vec<u8>, nonce: Nonce) -> Result<()>;
+    async fn start(encryption_key_ciphertext: Vec<u8>, nonce: Vec<u8>) -> Result<(), String>;
 }
 
 pub struct EncryptedServer {
@@ -38,6 +37,9 @@ impl EncryptedServer {
 }
 
 impl EncryptedRPCs for EncryptedServer {
+    //    type SyncPublicKeysFut = Ready<PublicKey>;
+    //    type StartFut = Ready<Result<()>>;
+
     async fn sync_public_keys(
         mut self,
         _: tarpc::context::Context,
@@ -47,24 +49,30 @@ impl EncryptedRPCs for EncryptedServer {
         self.bob_secret_key.public_key()
     }
 
-    fn start(
+    async fn start(
         mut self,
         _context: tarpc::context::Context,
         encryption_key_ciphertext: Vec<u8>,
-        nonce: Nonce,
-    ) -> Result<()> {
+        nonce: Vec<u8>,
+    ) -> Result<(), String> {
         match self.bob_cha_cha_box {
             Some(cha_cha_box) => {
-                let t = Some(
-                    cha_cha_box
-                        .decrypt(&nonce, encryption_key_ciphertext.as_slice())?
-                        .first_chunk::<32>()
-                        .ok_or(String::from("Byte length of key is not 32"))?,
-                );
+                let Ok(encrypted_vec) = cha_cha_box.decrypt(
+                    &Nonce::clone_from_slice(&nonce),
+                    encryption_key_ciphertext.as_slice(),
+                ) else {
+                    return Err(String::from("Decryption failed"));
+                };
+
+                let Some(first_chunk) = encrypted_vec.first_chunk::<32>() else {
+                    return Err(String::from("Wrong encryption key length"));
+                };
+
+                self.encryption_key = Some(first_chunk.to_owned());
 
                 Ok(())
             }
-            None => bail!("public keys not synced, yet!"),
+            None => Err(String::from("public keys not synced, yet!")),
         }
     }
 }

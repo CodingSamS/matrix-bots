@@ -5,7 +5,9 @@ use crypto_box::{
     ChaChaBox, PublicKey, SecretKey,
 };
 use encrypted_message::Message;
-use std::net::Ipv4Addr;
+use encrypted_server::EncryptedRPCsClient;
+use std::net::SocketAddr;
+use tarpc::{client, context, tokio_serde::formats::Json};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -23,54 +25,35 @@ struct Args {
 
     /// IP of receiver
     #[arg(short, long)]
-    ip: Ipv4Addr,
-
-    /// Port of receiver
-    #[arg(short, long)]
-    port: u8,
+    server_addr: SocketAddr,
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() {
     let args = Args::parse();
 
-    let (mut socket_reader, mut socket_writer) =
-        TcpStream::connect(format!("{}:{}", args.ip, args.port))
-            .await?
-            .into_split();
+    let mut transport = tarpc::serde_transport::tcp::connect(args.server_addr, Json::default);
+    transport.config_mut().max_frame_length(usize::MAX);
+
+    let client =
+        EncryptedRPCsClient::new(client::Config::default(), transport.await.unwrap()).spawn();
 
     // generate random key
     let alice_secret_key = SecretKey::generate(&mut OsRng);
-    let alice_public_key = Vec::from(alice_secret_key.public_key().as_bytes());
+    let alice_public_key = alice_secret_key.public_key();
 
-    let message = Message::PublicKeyMessage(alice_public_key);
-
-    socket_writer
-        .write_all(&serde_json::to_vec(&message)?)
-        .await?;
-
-    let mut buf = Vec::new();
-    socket_reader.read_to_end(&mut buf).await?;
-
-    let message: Message = serde_json::from_slice(&buf)?;
-
-    let bob_public_key = match message {
-        Message::StringMessage(_) => bail!("Wrong response when expecting bobs public key"),
-        Message::PublicKeyMessage(key) => PublicKey::from_slice(&key)?,
-    };
+    let bob_public_key = client
+        .sync_public_keys(context::current(), alice_public_key)
+        .await
+        .unwrap();
 
     let alice_box = ChaChaBox::new(&bob_public_key, &alice_secret_key);
-
     let nonce = ChaChaBox::generate_nonce(&mut OsRng);
+    let ciphertext = alice_box.encrypt(&nonce, args.message.as_bytes()).unwrap();
 
-    let ciphertext = alice_box.encrypt(&nonce, args.message.as_bytes())?;
-
-    let message = Message::PublicKeyMessage(ciphertext.to_owned());
-
-    socket_writer
-        .write_all(&serde_json::to_vec(&message)?)
-        .await?;
-
-    println!("Hello, world!");
-    Ok(())
+    client
+        .start(context::current(), ciphertext, nonce.to_vec())
+        .await
+        .unwrap()
+        .unwrap()
 }
