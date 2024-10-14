@@ -1,19 +1,11 @@
-use anyhow::bail;
 use clap::Parser;
 use crypto_box::{
     aead::{Aead, AeadCore, OsRng},
-    ChaChaBox, PublicKey, SecretKey,
+    ChaChaBox, SecretKey,
 };
-use encrypted_message::Message;
 use encrypted_server::EncryptedRPCsClient;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
-use tokio_serde::{formats::SymmetricalBincode, Deserializer, Framed, Serializer};
-use tokio_util::codec::{FramedWrite, LengthDelimitedCodec};
 
 /// A program to send an encrypted message to an receiver
 #[derive(Parser, Debug)]
