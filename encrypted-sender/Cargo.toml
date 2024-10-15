@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 crypto_box = { workspace = true }
 clap = { workspace = true }
-encrypted-server = { path = "../encrypted-server" }
+encrypted-startup = { path = "../encrypted-startup" }
 tokio = { workspace = true }
 tarpc = { workspace = true }

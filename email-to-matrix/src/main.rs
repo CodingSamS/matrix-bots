@@ -1,13 +1,16 @@
 use std::{
     env,
     fmt::Debug,
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr},
     path::{Path, PathBuf},
     process::exit,
     str,
+    sync::Arc,
 };
 
 use anyhow::{bail, Context};
+use encrypted_startup::{EncryptedStartup, StartupFunction};
+use futures::prelude::Future;
 use futures_util::stream::StreamExt;
 use log::{debug, error, info, warn};
 use mail_parser::MessageParser;
@@ -40,14 +43,21 @@ use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Key, Nonce,
 };
-use tokio::fs;
-use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpListener;
-use tokio::net::TcpStream;
-use tokio::sync::mpsc::{self, Receiver, Sender};
-use tokio::sync::OnceCell;
-use tokio::time::sleep;
-use tokio::time::Duration;
+use tarpc::{
+    serde_transport::tcp,
+    server::{BaseChannel, Channel},
+    tokio_serde::formats::Json,
+};
+use tokio::{
+    fs,
+    io::{stdin, stdout, AsyncBufReadExt, AsyncWriteExt, BufReader},
+    net::{TcpListener, TcpStream},
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        Mutex, OnceCell,
+    },
+    time::{sleep, Duration},
+};
 
 const INITIAL_DEVICE_DISPLAY_NAME: &str = "Mail Notif Bot";
 const CHANNEL_BUFFER_SIZE: usize = 100;
@@ -642,8 +652,109 @@ async fn _test_sender(tx: Sender<String>) -> anyhow::Result<()> {
     }
 }
 
+async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
+    tokio::spawn(fut);
+}
+
+#[derive(Clone)]
+pub struct EncryptedMatrixServer {
+    bob_secret_key: SecretKey,
+    alice_public_key_option: Arc<Mutex<Option<PublicKey>>>,
+}
+
+impl EncryptedMatrixServer {
+    pub fn new(alice_public_key_option: Arc<Mutex<Option<PublicKey>>>) -> Self {
+        EncryptedMatrixServer {
+            bob_secret_key: SecretKey::generate(&mut OsRng),
+            alice_public_key_option,
+        }
+    }
+}
+
+impl EncryptedStartup for EncryptedMatrixServer {
+    //    type SyncPublicKeysFut = Ready<PublicKey>;
+    //    type StartFut = Ready<Result<()>>;
+
+    async fn sync_public_keys(
+        self,
+        _: tarpc::context::Context,
+        alice_public_key: PublicKey,
+    ) -> PublicKey {
+        let mut lock = self.alice_public_key_option.lock().await;
+        *lock = Some(alice_public_key);
+        self.bob_secret_key.public_key()
+    }
+
+    async fn start(
+        self,
+        _context: tarpc::context::Context,
+        encryption_key_ciphertext: Vec<u8>,
+        nonce: Vec<u8>,
+    ) {
+        match self.alice_public_key_option.lock().await.to_owned() {
+            Some(alice_public_key) => {
+                let cha_cha_box = ChaChaBox::new(&alice_public_key, &self.bob_secret_key);
+                let Ok(encrypted_vec) = cha_cha_box.decrypt(
+                    &Nonce::clone_from_slice(&nonce),
+                    encryption_key_ciphertext.as_slice(),
+                ) else {
+                    error!("Decryption failed");
+                    return;
+                };
+
+                let Some(first_chunk) = encrypted_vec.first_chunk::<32>() else {
+                    error!("Wrong encryption key length");
+                    return;
+                };
+
+                self.startup_function(first_chunk.to_owned()).await;
+            }
+            None => error!("public keys not synced, yet!"),
+        }
+    }
+}
+
+impl StartupFunction for EncryptedMatrixServer {
+    async fn startup_function(encryption_key: [u8; 32]) -> impl Future<Output = ()> {
+        let session_file = &CONFIG.get().unwrap().matrix_data_dir.join("session");
+
+        let key = Key::<Aes256Gcm>::from_slice(&encryption_key);
+        let cipher = Aes256Gcm::new(&key);
+        match CIPHER.set(cipher) {
+            Ok(()) => debug!("Writing cipher to OnceLock was successful"),
+            Err(_) => {
+                error!("Writing cipher to OnceLock failed");
+                exit(1)
+            }
+        };
+
+        let client = if session_file.exists() {
+            restore_session(&session_file).await.unwrap()
+        } else {
+            login(&session_file).await.unwrap()
+        };
+
+        let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel(CHANNEL_BUFFER_SIZE);
+
+        tokio::spawn(matrix_room_bot(client.to_owned(), rx));
+
+        tokio::spawn(mail_server(tx));
+
+        info!("server started");
+
+        let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
+
+        client.sync(sync_settings).await.unwrap();
+
+        warn!("sync finished");
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let t = start;
+    t.what();
+    // read config from cli
     env_logger::init();
     let config_path = match env::args().nth(1) {
         Some(path) => path,
@@ -660,52 +771,22 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let session_file = &CONFIG
-        .get()
-        .context("no config")?
-        .matrix_data_dir
-        .join("session");
+    // start service
+    let server_addr = (IpAddr::V4(Ipv4Addr::LOCALHOST), 20000);
 
-    let mut encryption_key_len = 0;
-    let mut encryption_key = String::new();
-    let mut stdin_reader = BufReader::new(stdin());
-    while encryption_key_len != 32 {
-        encryption_key = String::new();
-        println!("Enter encryption key of byte length 32:");
-        stdin_reader.read_line(&mut encryption_key).await.unwrap();
-        encryption_key_len = encryption_key.trim().len();
-    }
-    info!("encryption key read successfully");
+    let mut listener = tcp::listen(&server_addr, Json::default).await?;
+    listener.config_mut().max_frame_length(usize::MAX);
+    let transport = listener
+        .next()
+        .await
+        .context("listener.next(): Option contains None")??;
 
-    let key: &Key<Aes256Gcm> = encryption_key.trim().as_bytes().into();
-    let cipher = Aes256Gcm::new(&key);
-    match CIPHER.set(cipher) {
-        Ok(()) => debug!("Writing cipher to OnceLock was successful"),
-        Err(_) => {
-            error!("Writing cipher to OnceLock failed");
-            exit(1)
-        }
-    };
-
-    let client = if session_file.exists() {
-        restore_session(&session_file).await?
-    } else {
-        login(&session_file).await?
-    };
-
-    let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel(CHANNEL_BUFFER_SIZE);
-
-    tokio::spawn(matrix_room_bot(client.to_owned(), rx));
-
-    tokio::spawn(mail_server(tx));
-
-    info!("server started");
-
-    let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
-
-    client.sync(sync_settings).await?;
-
-    warn!("sync finished");
+    BaseChannel::with_defaults(transport)
+        .execute(EncryptedMatrixServer::serve(EncryptedMatrixServer::new(
+            Arc::new(Mutex::new(None)),
+        )))
+        .for_each(spawn)
+        .await;
 
     Ok(())
 }

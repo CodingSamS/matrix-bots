@@ -772,7 +772,9 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
+ "encrypted-startup",
  "env_logger",
+ "futures",
  "futures-util",
  "log",
  "mail-parser",
@@ -782,6 +784,7 @@ dependencies = [
  "retry",
  "serde",
  "serde_json",
+ "tarpc",
  "tokio",
  "url",
 ]
@@ -808,19 +811,21 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "crypto_box",
- "encrypted-server",
+ "encrypted-startup",
  "tarpc",
  "tokio",
 ]
 
 [[package]]
-name = "encrypted-server"
+name = "encrypted-startup"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "crypto_box",
+ "env_logger",
  "futures",
+ "log",
  "tarpc",
+ "tokio",
 ]
 
 [[package]]

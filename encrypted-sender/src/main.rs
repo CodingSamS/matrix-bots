@@ -3,7 +3,7 @@ use crypto_box::{
     aead::{Aead, AeadCore, OsRng},
     ChaChaBox, SecretKey,
 };
-use encrypted_server::EncryptedRPCsClient;
+use encrypted_startup::EncryptedStartupClient;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
 
@@ -28,7 +28,7 @@ async fn main() {
     transport.config_mut().max_frame_length(usize::MAX);
 
     let client =
-        EncryptedRPCsClient::new(client::Config::default(), transport.await.unwrap()).spawn();
+        EncryptedStartupClient::new(client::Config::default(), transport.await.unwrap()).spawn();
 
     // generate random key
     let alice_secret_key = SecretKey::generate(&mut OsRng);

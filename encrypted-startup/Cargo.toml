@@ -1,0 +1,13 @@
+[package]
+name = "encrypted-startup"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+log = { workspace = true }
+env_logger = { workspace = true }
+futures = { workspace = true }
+tarpc = { workspace = true }
+tokio = { workspace = true }
+crypto_box = { workspace = true }
+
