@@ -772,6 +772,7 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
+ "crypto_box",
  "encrypted-startup",
  "env_logger",
  "futures",

@@ -9,8 +9,9 @@ use std::{
 };
 
 use anyhow::{bail, Context};
+use crypto_box::{ChaChaBox, PublicKey, SecretKey};
 use encrypted_startup::{EncryptedStartup, StartupFunction};
-use futures::prelude::Future;
+use futures::{future::Ready, prelude::Future};
 use futures_util::stream::StreamExt;
 use log::{debug, error, info, warn};
 use mail_parser::MessageParser;
@@ -707,7 +708,7 @@ impl EncryptedStartup for EncryptedMatrixServer {
                     return;
                 };
 
-                self.startup_function(first_chunk.to_owned()).await;
+                EncryptedMatrixServer::startup_function(first_chunk.to_owned()).await;
             }
             None => error!("public keys not synced, yet!"),
         }
@@ -715,7 +716,7 @@ impl EncryptedStartup for EncryptedMatrixServer {
 }
 
 impl StartupFunction for EncryptedMatrixServer {
-    async fn startup_function(encryption_key: [u8; 32]) -> impl Future<Output = ()> {
+    async fn startup_function(encryption_key: [u8; 32]) {
         let session_file = &CONFIG.get().unwrap().matrix_data_dir.join("session");
 
         let key = Key::<Aes256Gcm>::from_slice(&encryption_key);

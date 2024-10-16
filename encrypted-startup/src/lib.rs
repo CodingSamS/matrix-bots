@@ -17,9 +17,10 @@ pub trait EncryptedStartup {
 }
 
 pub trait StartupFunction {
-    async fn startup_function(encryption_key: [u8; 32]) -> impl Future<Output = ()>;
+    async fn startup_function(encryption_key: [u8; 32]);
 }
 
+/*
 #[derive(Clone)]
 struct EncryptedMatrixServer {
     bob_secret_key: SecretKey,
@@ -77,3 +78,4 @@ impl EncryptedStartup for EncryptedMatrixServer {
         }
     }
 }
+*/
