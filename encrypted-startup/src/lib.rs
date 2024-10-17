@@ -20,15 +20,16 @@ pub trait StartupFunction {
     async fn startup_function(encryption_key: [u8; 32]);
 }
 
-/*
+
 #[derive(Clone)]
-struct EncryptedMatrixServer {
+pub struct EncryptedStartupServer {
     bob_secret_key: SecretKey,
     alice_public_key_option: Arc<Mutex<Option<PublicKey>>>,
+    startup_function: Box<dyn StartupFunction>,
 }
 
-impl EncryptedMatrixServer {
-    pub fn new(alice_public_key_option: Arc<Mutex<Option<PublicKey>>>) -> Self {
+impl EncryptedStartupServer {
+    pub fn new(alice_public_key_option: Arc<Mutex<Option<PublicKey>>>, startup_function: Box<dyn StartupFunction>) -> Self {
         EncryptedMatrixServer {
             bob_secret_key: SecretKey::generate(&mut OsRng),
             alice_public_key_option,
@@ -36,7 +37,7 @@ impl EncryptedMatrixServer {
     }
 }
 
-impl EncryptedStartup for EncryptedMatrixServer {
+impl EncryptedStartup for EncryptedStartupServer {
     //    type SyncPublicKeysFut = Ready<PublicKey>;
     //    type StartFut = Ready<Result<()>>;
 
