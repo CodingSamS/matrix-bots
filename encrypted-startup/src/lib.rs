@@ -17,9 +17,8 @@ pub trait EncryptedStartup {
 }
 
 pub trait StartupFunction {
-    async fn startup_function(encryption_key: [u8; 32]);
+    async fn startup_function(&self, encryption_key: [u8; 32]);
 }
-
 
 #[derive(Clone)]
 pub struct EncryptedStartupServer {
@@ -29,10 +28,14 @@ pub struct EncryptedStartupServer {
 }
 
 impl EncryptedStartupServer {
-    pub fn new(alice_public_key_option: Arc<Mutex<Option<PublicKey>>>, startup_function: Box<dyn StartupFunction>) -> Self {
-        EncryptedMatrixServer {
+    pub fn new(
+        alice_public_key_option: Arc<Mutex<Option<PublicKey>>>,
+        startup_function: Box<dyn StartupFunction>,
+    ) -> Self {
+        EncryptedStartupServer {
             bob_secret_key: SecretKey::generate(&mut OsRng),
             alice_public_key_option,
+            startup_function,
         }
     }
 }
@@ -72,11 +75,10 @@ impl EncryptedStartup for EncryptedStartupServer {
                     error!("Wrong encryption key length");
                     return;
                 };
-
-                (self.startup_function)(first_chunk.to_owned());
+                let t = &*self.startup_function;
+                &*self.startup_function(first_chunk.to_owned());
             }
             None => error!("public keys not synced, yet!"),
         }
     }
 }
-*/
