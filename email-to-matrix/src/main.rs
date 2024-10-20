@@ -10,13 +10,16 @@ use std::{
 
 use anyhow::{bail, Context};
 use crypto_box::{ChaChaBox, PublicKey, SecretKey};
-use encrypted_startup::{EncryptedStartup, StartupFunction};
-use futures::{future::Ready, prelude::Future};
+use encrypted_startup::{EncryptedStartup, EncryptedStartupHelper};
+use futures::{
+    future::{self, Ready},
+    prelude::Future,
+};
 use futures_util::stream::StreamExt;
 use log::{debug, error, info, warn};
 use mail_parser::MessageParser;
 use mailin::SessionBuilder;
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rand::{distributions::Alphanumeric, rngs::OsRng, thread_rng, Rng};
 
 use matrix_sdk::{
     config::SyncSettings,
@@ -41,7 +44,7 @@ use retry::retry;
 use serde::{Deserialize, Serialize};
 
 use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    aead::{Aead, AeadCore, KeyInit},
     Aes256Gcm, Key, Nonce,
 };
 use tarpc::{
@@ -403,9 +406,8 @@ async fn request_verification_handler(client: Client, request: VerificationReque
 
 /// Login with a new device.
 async fn login(session_file: &Path) -> anyhow::Result<Client> {
-    let mut rng = thread_rng();
     // Generate a random passphrase.
-    let passphrase: String = (&mut rng)
+    let passphrase: String = (&mut OsRng)
         .sample_iter(Alphanumeric)
         .take(32)
         .map(char::from)
@@ -658,32 +660,29 @@ async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
 }
 
 #[derive(Clone)]
-pub struct EncryptedMatrixServer {
-    bob_secret_key: SecretKey,
-    alice_public_key_option: Arc<Mutex<Option<PublicKey>>>,
+struct EncryptedMatrixServer {
+    helper: EncryptedStartupHelper,
 }
 
 impl EncryptedMatrixServer {
-    pub fn new(alice_public_key_option: Arc<Mutex<Option<PublicKey>>>) -> Self {
+    fn new(
+        bob_secret_key: SecretKey,
+        alice_public_key_option: Arc<Mutex<Option<PublicKey>>>,
+    ) -> Self {
         EncryptedMatrixServer {
-            bob_secret_key: SecretKey::generate(&mut OsRng),
-            alice_public_key_option,
+            helper: EncryptedStartupHelper::new(bob_secret_key, alice_public_key_option),
         }
     }
 }
 
 impl EncryptedStartup for EncryptedMatrixServer {
-    //    type SyncPublicKeysFut = Ready<PublicKey>;
-    //    type StartFut = Ready<Result<()>>;
-
     async fn sync_public_keys(
         self,
         _: tarpc::context::Context,
         alice_public_key: PublicKey,
     ) -> PublicKey {
-        let mut lock = self.alice_public_key_option.lock().await;
-        *lock = Some(alice_public_key);
-        self.bob_secret_key.public_key()
+        self.helper.set_alice_public_key(alice_public_key).await;
+        self.helper.bob_secret_key.public_key()
     }
 
     async fn start(
@@ -692,69 +691,49 @@ impl EncryptedStartup for EncryptedMatrixServer {
         encryption_key_ciphertext: Vec<u8>,
         nonce: Vec<u8>,
     ) {
-        match self.alice_public_key_option.lock().await.to_owned() {
-            Some(alice_public_key) => {
-                let cha_cha_box = ChaChaBox::new(&alice_public_key, &self.bob_secret_key);
-                let Ok(encrypted_vec) = cha_cha_box.decrypt(
-                    &Nonce::clone_from_slice(&nonce),
-                    encryption_key_ciphertext.as_slice(),
-                ) else {
-                    error!("Decryption failed");
-                    return;
+        let decryption_result = self.helper.decrypt(encryption_key_ciphertext, nonce).await;
+        match decryption_result {
+            Ok(encryption_key) => {
+                let session_file = &CONFIG.get().unwrap().matrix_data_dir.join("session");
+
+                let key = Key::<Aes256Gcm>::from_slice(&encryption_key);
+                let cipher = Aes256Gcm::new(&key);
+                match CIPHER.set(cipher) {
+                    Ok(()) => debug!("Writing cipher to OnceLock was successful"),
+                    Err(_) => {
+                        error!("Writing cipher to OnceLock failed");
+                        exit(1)
+                    }
                 };
 
-                let Some(first_chunk) = encrypted_vec.first_chunk::<32>() else {
-                    error!("Wrong encryption key length");
-                    return;
+                let client = if session_file.exists() {
+                    restore_session(&session_file).await.unwrap()
+                } else {
+                    login(&session_file).await.unwrap()
                 };
 
-                EncryptedMatrixServer::startup_function(first_chunk.to_owned()).await;
+                let (tx, rx): (Sender<String>, Receiver<String>) =
+                    mpsc::channel(CHANNEL_BUFFER_SIZE);
+
+                tokio::spawn(matrix_room_bot(client.to_owned(), rx));
+
+                tokio::spawn(mail_server(tx));
+
+                info!("server started");
+
+                let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
+
+                client.sync(sync_settings).await.unwrap();
+
+                warn!("sync finished");
             }
-            None => error!("public keys not synced, yet!"),
-        }
-    }
-}
-
-impl StartupFunction for EncryptedMatrixServer {
-    async fn startup_function(encryption_key: [u8; 32]) {
-        let session_file = &CONFIG.get().unwrap().matrix_data_dir.join("session");
-
-        let key = Key::<Aes256Gcm>::from_slice(&encryption_key);
-        let cipher = Aes256Gcm::new(&key);
-        match CIPHER.set(cipher) {
-            Ok(()) => debug!("Writing cipher to OnceLock was successful"),
-            Err(_) => {
-                error!("Writing cipher to OnceLock failed");
-                exit(1)
-            }
+            Err(e) => error!("Decrypting the message failed with: {}", e),
         };
-
-        let client = if session_file.exists() {
-            restore_session(&session_file).await.unwrap()
-        } else {
-            login(&session_file).await.unwrap()
-        };
-
-        let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel(CHANNEL_BUFFER_SIZE);
-
-        tokio::spawn(matrix_room_bot(client.to_owned(), rx));
-
-        tokio::spawn(mail_server(tx));
-
-        info!("server started");
-
-        let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
-
-        client.sync(sync_settings).await.unwrap();
-
-        warn!("sync finished");
     }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let t = start;
-    t.what();
     // read config from cli
     env_logger::init();
     let config_path = match env::args().nth(1) {
@@ -782,10 +761,17 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("listener.next(): Option contains None")??;
 
+    let bob_secret_key = SecretKey::from([
+        0xb5, 0x81, 0xfb, 0x5a, 0xe1, 0x82, 0xa1, 0x6f, 0x60, 0x3f, 0x39, 0x27, 0xd, 0x4e, 0x3b,
+        0x95, 0xbc, 0x0, 0x83, 0x10, 0xb7, 0x27, 0xa1, 0x1d, 0xd4, 0xe7, 0x84, 0xa0, 0x4, 0x4d,
+        0x46, 0x1b,
+    ]);
+
+    let encrypted_matrix_server =
+        EncryptedMatrixServer::new(bob_secret_key, Arc::new(Mutex::new(None)));
+
     BaseChannel::with_defaults(transport)
-        .execute(EncryptedMatrixServer::serve(EncryptedMatrixServer::new(
-            Arc::new(Mutex::new(None)),
-        )))
+        .execute(EncryptedMatrixServer::serve(encrypted_matrix_server))
         .for_each(spawn)
         .await;
 

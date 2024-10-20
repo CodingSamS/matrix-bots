@@ -822,9 +822,6 @@ name = "encrypted-startup"
 version = "0.1.0"
 dependencies = [
  "crypto_box",
- "env_logger",
- "futures",
- "log",
  "tarpc",
  "tokio",
 ]

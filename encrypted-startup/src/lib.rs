@@ -1,9 +1,4 @@
-use crypto_box::{
-    aead::{Aead, OsRng},
-    ChaChaBox, Nonce, PublicKey, SecretKey,
-};
-use futures::prelude::Future;
-use log::{debug, error, info, warn};
+use crypto_box::{aead::Aead, ChaChaBox, Nonce, PublicKey, SecretKey};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -16,69 +11,48 @@ pub trait EncryptedStartup {
     async fn start(encryption_key_ciphertext: Vec<u8>, nonce: Vec<u8>);
 }
 
-pub trait StartupFunction {
-    async fn startup_function(&self, encryption_key: [u8; 32]);
-}
-
 #[derive(Clone)]
-pub struct EncryptedStartupServer {
-    bob_secret_key: SecretKey,
+pub struct EncryptedStartupHelper {
+    pub bob_secret_key: SecretKey,
     alice_public_key_option: Arc<Mutex<Option<PublicKey>>>,
-    startup_function: Box<dyn StartupFunction>,
 }
 
-impl EncryptedStartupServer {
-    pub fn new(
-        alice_public_key_option: Arc<Mutex<Option<PublicKey>>>,
-        startup_function: Box<dyn StartupFunction>,
-    ) -> Self {
-        EncryptedStartupServer {
+impl EncryptedStartupHelper {
+    pub fn new(alice_public_key_option: Arc<Mutex<Option<PublicKey>>>) -> Self {
+        EncryptedStartupHelper {
             bob_secret_key: SecretKey::generate(&mut OsRng),
             alice_public_key_option,
-            startup_function,
         }
     }
-}
 
-impl EncryptedStartup for EncryptedStartupServer {
-    //    type SyncPublicKeysFut = Ready<PublicKey>;
-    //    type StartFut = Ready<Result<()>>;
-
-    async fn sync_public_keys(
-        self,
-        _: tarpc::context::Context,
-        alice_public_key: PublicKey,
-    ) -> PublicKey {
+    pub async fn set_alice_public_key(&self, alice_public_key: PublicKey) {
         let mut lock = self.alice_public_key_option.lock().await;
         *lock = Some(alice_public_key);
-        self.bob_secret_key.public_key()
     }
 
-    async fn start(
+    pub async fn decrypt(
         self,
-        _context: tarpc::context::Context,
-        encryption_key_ciphertext: Vec<u8>,
+        ciphertext: Vec<u8>,
         nonce: Vec<u8>,
-    ) {
+    ) -> Result<[u8; 32], &'static str> {
         match self.alice_public_key_option.lock().await.to_owned() {
             Some(alice_public_key) => {
                 let cha_cha_box = ChaChaBox::new(&alice_public_key, &self.bob_secret_key);
-                let Ok(encrypted_vec) = cha_cha_box.decrypt(
-                    &Nonce::clone_from_slice(&nonce),
-                    encryption_key_ciphertext.as_slice(),
-                ) else {
-                    error!("Decryption failed");
-                    return;
+                let Ok(encrypted_vec) =
+                    cha_cha_box.decrypt(&Nonce::clone_from_slice(&nonce), ciphertext.as_slice())
+                else {
+                    return Err("Decryption failed");
                 };
 
                 let Some(first_chunk) = encrypted_vec.first_chunk::<32>() else {
-                    error!("Wrong encryption key length");
-                    return;
+                    return Err("Wrong encryption key length");
                 };
-                let t = &*self.startup_function;
-                &*self.startup_function(first_chunk.to_owned());
+
+                drop(cha_cha_box);
+
+                Ok(first_chunk.to_owned())
             }
-            None => error!("public keys not synced, yet!"),
+            None => Err("public keys not synced, yet!"),
         }
     }
 }
