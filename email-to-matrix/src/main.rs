@@ -659,18 +659,54 @@ async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
     tokio::spawn(fut);
 }
 
+async fn start_server(encryption_key: [u8; 32]) -> anyhow::Result<()> {
+    let session_file = &CONFIG
+        .get()
+        .context("unable to get config")?
+        .matrix_data_dir
+        .join("session");
+
+    let key = Key::<Aes256Gcm>::from_slice(&encryption_key);
+    let cipher = Aes256Gcm::new(&key);
+    match CIPHER.set(cipher) {
+        Ok(()) => debug!("Writing cipher to OnceLock was successful"),
+        Err(_) => {
+            bail!("Writing cipher to OnceLock failed");
+        }
+    };
+
+    let client = if session_file.exists() {
+        restore_session(&session_file).await?
+    } else {
+        login(&session_file).await?
+    };
+
+    let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel(CHANNEL_BUFFER_SIZE);
+
+    tokio::spawn(matrix_room_bot(client.to_owned(), rx));
+
+    tokio::spawn(mail_server(tx));
+
+    info!("server started");
+
+    let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
+
+    client.sync(sync_settings).await?;
+
+    warn!("sync finished");
+
+    Ok(())
+}
+
 #[derive(Clone)]
 struct EncryptedMatrixServer {
     helper: EncryptedStartupHelper,
 }
 
 impl EncryptedMatrixServer {
-    fn new(
-        bob_secret_key: SecretKey,
-        alice_public_key_option: Arc<Mutex<Option<PublicKey>>>,
-    ) -> Self {
+    fn new(alice_public_key_option: Option<PublicKey>) -> Self {
         EncryptedMatrixServer {
-            helper: EncryptedStartupHelper::new(bob_secret_key, alice_public_key_option),
+            helper: EncryptedStartupHelper::new(alice_public_key_option),
         }
     }
 }
@@ -690,45 +726,15 @@ impl EncryptedStartup for EncryptedMatrixServer {
         _context: tarpc::context::Context,
         encryption_key_ciphertext: Vec<u8>,
         nonce: Vec<u8>,
-    ) {
+    ) -> Result<(), String> {
         let decryption_result = self.helper.decrypt(encryption_key_ciphertext, nonce).await;
         match decryption_result {
             Ok(encryption_key) => {
-                let session_file = &CONFIG.get().unwrap().matrix_data_dir.join("session");
-
-                let key = Key::<Aes256Gcm>::from_slice(&encryption_key);
-                let cipher = Aes256Gcm::new(&key);
-                match CIPHER.set(cipher) {
-                    Ok(()) => debug!("Writing cipher to OnceLock was successful"),
-                    Err(_) => {
-                        error!("Writing cipher to OnceLock failed");
-                        exit(1)
-                    }
-                };
-
-                let client = if session_file.exists() {
-                    restore_session(&session_file).await.unwrap()
-                } else {
-                    login(&session_file).await.unwrap()
-                };
-
-                let (tx, rx): (Sender<String>, Receiver<String>) =
-                    mpsc::channel(CHANNEL_BUFFER_SIZE);
-
-                tokio::spawn(matrix_room_bot(client.to_owned(), rx));
-
-                tokio::spawn(mail_server(tx));
-
-                info!("server started");
-
-                let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
-
-                client.sync(sync_settings).await.unwrap();
-
-                warn!("sync finished");
+                let task = tokio::spawn(start_server(encryption_key));
+                Ok(())
             }
-            Err(e) => error!("Decrypting the message failed with: {}", e),
-        };
+            Err(_) => Err(String::from("Decrypting the message failed")),
+        }
     }
 }
 
@@ -761,14 +767,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("listener.next(): Option contains None")??;
 
-    let bob_secret_key = SecretKey::from([
-        0xb5, 0x81, 0xfb, 0x5a, 0xe1, 0x82, 0xa1, 0x6f, 0x60, 0x3f, 0x39, 0x27, 0xd, 0x4e, 0x3b,
-        0x95, 0xbc, 0x0, 0x83, 0x10, 0xb7, 0x27, 0xa1, 0x1d, 0xd4, 0xe7, 0x84, 0xa0, 0x4, 0x4d,
-        0x46, 0x1b,
-    ]);
-
-    let encrypted_matrix_server =
-        EncryptedMatrixServer::new(bob_secret_key, Arc::new(Mutex::new(None)));
+    let encrypted_matrix_server = EncryptedMatrixServer::new(None);
 
     BaseChannel::with_defaults(transport)
         .execute(EncryptedMatrixServer::serve(encrypted_matrix_server))

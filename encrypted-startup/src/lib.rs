@@ -1,4 +1,7 @@
-use crypto_box::{aead::Aead, ChaChaBox, Nonce, PublicKey, SecretKey};
+use crypto_box::{
+    aead::{Aead, OsRng},
+    ChaChaBox, Nonce, PublicKey, SecretKey,
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -7,8 +10,17 @@ pub trait EncryptedStartup {
     /// Receives the public key of the other side, processes it, and responds with the own one
     async fn sync_public_keys(alice_public_key: PublicKey) -> PublicKey;
 
-    /// Starts up the service. sync_public_keys needs to be done beforehand
-    async fn start(encryption_key_ciphertext: Vec<u8>, nonce: Vec<u8>);
+    /// Loads the session for the client. sync_public_keys needs to be done beforehand. returns if it needs to restore or do interactive cross signing
+    async fn load_session(encryption_key_ciphertext: Vec<u8>, nonce: Vec<u8>) -> Result<(), String>;
+
+    /// getting interactive cross signing request
+    async fn get_cross_signing_symbols()
+
+    /// answering the request if the symbols match
+    async fn confirm_cross_signing_symbols()
+
+    /// simple start
+    async fn start() -> Result<(), String>
 }
 
 #[derive(Clone)]
@@ -18,10 +30,10 @@ pub struct EncryptedStartupHelper {
 }
 
 impl EncryptedStartupHelper {
-    pub fn new(alice_public_key_option: Arc<Mutex<Option<PublicKey>>>) -> Self {
+    pub fn new(alice_public_key_option: Option<PublicKey>) -> Self {
         EncryptedStartupHelper {
             bob_secret_key: SecretKey::generate(&mut OsRng),
-            alice_public_key_option,
+            alice_public_key_option: Arc::new(Mutex::new(alice_public_key_option)),
         }
     }
 
