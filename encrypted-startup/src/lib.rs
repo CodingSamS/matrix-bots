@@ -2,8 +2,15 @@ use crypto_box::{
     aead::{Aead, OsRng},
     ChaChaBox, Nonce, PublicKey, SecretKey,
 };
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum SessionState {
+    SessionExists,
+    SessionMissing,
+}
 
 #[tarpc::service]
 pub trait EncryptedStartup {
@@ -11,16 +18,19 @@ pub trait EncryptedStartup {
     async fn sync_public_keys(alice_public_key: PublicKey) -> PublicKey;
 
     /// Loads the session for the client. sync_public_keys needs to be done beforehand. returns if it needs to restore or do interactive cross signing
-    async fn load_session(encryption_key_ciphertext: Vec<u8>, nonce: Vec<u8>) -> Result<(), String>;
+    async fn load_cipher(
+        encryption_key_ciphertext: Vec<u8>,
+        nonce: Vec<u8>,
+    ) -> Result<SessionState, String>;
 
     /// getting interactive cross signing request
-    async fn get_cross_signing_symbols()
+    async fn get_cross_signing_symbols();
 
     /// answering the request if the symbols match
-    async fn confirm_cross_signing_symbols()
+    async fn confirm_cross_signing_symbols();
 
     /// simple start
-    async fn start() -> Result<(), String>
+    async fn start() -> Result<(), String>;
 }
 
 #[derive(Clone)]

@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::{bail, Context};
 use crypto_box::{ChaChaBox, PublicKey, SecretKey};
-use encrypted_startup::{EncryptedStartup, EncryptedStartupHelper};
+use encrypted_startup::{EncryptedStartup, EncryptedStartupHelper, SessionState};
 use futures::{
     future::{self, Ready},
     prelude::Future,
@@ -66,8 +66,6 @@ use tokio::{
 const INITIAL_DEVICE_DISPLAY_NAME: &str = "Mail Notif Bot";
 const CHANNEL_BUFFER_SIZE: usize = 100;
 const MAIL_HANDLER_SEND_MAX_RETRIES: u32 = 5;
-static CONFIG: OnceCell<Config> = OnceCell::const_new();
-static CIPHER: OnceCell<Aes256Gcm> = OnceCell::const_new();
 
 #[derive(Serialize, Deserialize, Debug)]
 struct EncryptedString {
@@ -129,32 +127,36 @@ struct FullSession {
     user_session: MatrixSession,
 }
 
-struct MailHandler {
+struct MailHandler<'a> {
     tx: Sender<String>,
     data: Vec<u8>,
     is_from_valid: bool,
     is_to_valid: bool,
+    mail_from: &'a String,
+    mail_to: &'a String,
 }
 
-impl MailHandler {
-    fn new(tx: Sender<String>) -> Self {
+impl<'a> MailHandler<'a> {
+    fn new(tx: Sender<String>, mail_from: &'a String, mail_to: &'a String) -> Self {
         MailHandler {
             tx,
             data: Vec::new(),
             is_from_valid: false,
             is_to_valid: false,
+            mail_from,
+            mail_to,
         }
     }
 }
 
-impl mailin::Handler for MailHandler {
+impl<'a> mailin::Handler for MailHandler<'a> {
     fn helo(&mut self, _ip: IpAddr, _domain: &str) -> mailin::Response {
         (self.is_from_valid, self.is_to_valid) = (false, false);
         mailin::response::OK
     }
 
     fn mail(&mut self, _ip: IpAddr, _domain: &str, from: &str) -> mailin::Response {
-        match from.contains(&CONFIG.get().unwrap().mail_from) {
+        match from.contains(self.mail_from) {
             true => {
                 self.is_from_valid = true;
                 mailin::response::OK
@@ -167,7 +169,7 @@ impl mailin::Handler for MailHandler {
     }
 
     fn rcpt(&mut self, to: &str) -> mailin::Response {
-        match to.contains(&CONFIG.get().unwrap().mail_to) {
+        match to.contains(self.mail_to) {
             true => {
                 self.is_to_valid = true;
                 mailin::response::OK
@@ -481,7 +483,7 @@ async fn login(session_file: &Path) -> anyhow::Result<Client> {
 }
 
 /// Restore a previous session.
-async fn restore_session(session_file: &Path) -> anyhow::Result<Client> {
+async fn restore_session(session_file: &Path, cipher: &Aes256Gcm) -> anyhow::Result<Client> {
     info!(
         "Previous session found in '{}'",
         session_file.to_string_lossy()
@@ -495,9 +497,7 @@ async fn restore_session(session_file: &Path) -> anyhow::Result<Client> {
     } = serde_json::from_str(&serialized_session)?;
 
     // Build the client with the previous settings from the session.
-    let passphrase = client_session
-        .passphrase
-        .get_decrypted_string(CIPHER.get().context("no cipher")?)?;
+    let passphrase = client_session.passphrase.get_decrypted_string(cipher)?;
 
     let client = Client::builder()
         .homeserver_url(&client_session.homeserver)
@@ -513,22 +513,18 @@ async fn restore_session(session_file: &Path) -> anyhow::Result<Client> {
     Ok(client)
 }
 
-async fn listen_to_socket_and_send_to_matrix(
+async fn listen_to_mail_socket_and_send_to_tx(
     tx: Sender<String>,
     mut stream: TcpStream,
+    mail_from: &String,
+    mail_to: &String,
+    mail_server_name: &String,
 ) -> anyhow::Result<()> {
-    let handler = MailHandler::new(tx);
+    let handler = MailHandler::new(tx, mail_from, mail_to);
 
     let remote_addr = stream.peer_addr()?;
 
-    let session = &mut SessionBuilder::new(
-        CONFIG
-            .get()
-            .context("no config")?
-            .mail_server_name
-            .to_owned(),
-    )
-    .build(remote_addr.ip(), handler);
+    let session = &mut SessionBuilder::new(mail_server_name).build(remote_addr.ip(), handler);
 
     let (stream_rx, mut stream_tx) = stream.split();
 
@@ -566,7 +562,12 @@ async fn listen_to_socket_and_send_to_matrix(
     Ok(())
 }
 
-async fn mail_server(tx: Sender<String>) -> anyhow::Result<()> {
+async fn mail_server(
+    tx: Sender<String>,
+    mail_from: String,
+    mail_to: String,
+    mail_server_name: String,
+) -> anyhow::Result<()> {
     // handling incoming connections
     let Ok(socket) = TcpListener::bind("0.0.0.0:25000").await else {
         error!("binding socket failed");
@@ -574,7 +575,15 @@ async fn mail_server(tx: Sender<String>) -> anyhow::Result<()> {
     };
 
     while let Ok((stream, _)) = socket.accept().await {
-        match listen_to_socket_and_send_to_matrix(tx.clone(), stream).await {
+        match listen_to_mail_socket_and_send_to_tx(
+            tx.clone(),
+            stream,
+            &mail_from,
+            &mail_to,
+            &mail_server_name,
+        )
+        .await
+        {
             Ok(_) => (),
             Err(err) => warn!("failure processing message: {}", err),
         }
@@ -585,12 +594,16 @@ async fn mail_server(tx: Sender<String>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn matrix_room_bot(client: Client, mut rx: Receiver<String>) -> anyhow::Result<()> {
-    let room_id = &CONFIG.get().context("no config")?.matrix_room_id.clone();
+async fn matrix_room_bot(
+    client: Client,
+    mut rx: Receiver<String>,
+    room_id: Box<RoomId>,
+) -> anyhow::Result<()> {
+    //   let room_id = &CONFIG.get().context("no config")?.matrix_room_id.clone();
 
     // remove this room variable and the test send later
     let test_room = match retry(Fixed::from_millis(5000).take(12), || {
-        match client.get_room(room_id) {
+        match client.get_room(&room_id) {
             Some(room) => Ok(room),
             None => Err("room not found"),
         }
@@ -614,7 +627,7 @@ async fn matrix_room_bot(client: Client, mut rx: Receiver<String>) -> anyhow::Re
             Some(message) => {
                 debug!("matrix room boot received message");
                 match retry(Fixed::from_millis(5000).take(12), || {
-                    match client.get_room(room_id) {
+                    match client.get_room(&room_id) {
                         Some(room) => Ok(room),
                         None => Err("room not found"),
                     }
@@ -646,44 +659,24 @@ async fn matrix_room_bot(client: Client, mut rx: Receiver<String>) -> anyhow::Re
     }
 }
 
-async fn _test_sender(tx: Sender<String>) -> anyhow::Result<()> {
-    let mut count = 0;
-    loop {
-        tx.send(format!("test {}", count)).await.unwrap();
-        count += 1;
-        sleep(Duration::from_secs(300)).await;
-    }
+async fn sync_client(client: Client) -> anyhow::Result<()> {
+    let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
+    client.sync(sync_settings).await?;
+    warn!("sync finished");
+    Ok(())
 }
 
 async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
     tokio::spawn(fut);
 }
 
+/*
 async fn start_server(encryption_key: [u8; 32]) -> anyhow::Result<()> {
-    let session_file = &CONFIG
-        .get()
-        .context("unable to get config")?
-        .matrix_data_dir
-        .join("session");
-
-    let key = Key::<Aes256Gcm>::from_slice(&encryption_key);
-    let cipher = Aes256Gcm::new(&key);
-    match CIPHER.set(cipher) {
-        Ok(()) => debug!("Writing cipher to OnceLock was successful"),
-        Err(_) => {
-            bail!("Writing cipher to OnceLock failed");
-        }
-    };
-
-    let client = if session_file.exists() {
-        restore_session(&session_file).await?
-    } else {
         login(&session_file).await?
-    };
 
     let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel(CHANNEL_BUFFER_SIZE);
 
-    tokio::spawn(matrix_room_bot(client.to_owned(), rx));
+//    tokio::spawn(matrix_room_bot(client.to_owned(), rx));
 
     tokio::spawn(mail_server(tx));
 
@@ -691,22 +684,29 @@ async fn start_server(encryption_key: [u8; 32]) -> anyhow::Result<()> {
 
     let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
 
-    client.sync(sync_settings).await?;
+    tokio::spawn(client.sync(sync_settings));
 
     warn!("sync finished");
 
     Ok(())
 }
+*/
 
 #[derive(Clone)]
 struct EncryptedMatrixServer {
     helper: EncryptedStartupHelper,
+    session_file: Arc<PathBuf>,
+    config: Arc<Config>,
+    cipher: Arc<Mutex<OnceCell<Aes256Gcm>>>,
 }
 
 impl EncryptedMatrixServer {
-    fn new(alice_public_key_option: Option<PublicKey>) -> Self {
+    fn new(alice_public_key_option: Option<PublicKey>, config: Config) -> Self {
         EncryptedMatrixServer {
             helper: EncryptedStartupHelper::new(alice_public_key_option),
+            session_file: Arc::new(config.matrix_data_dir.join("session").to_owned()),
+            config: Arc::new(config),
+            cipher: Arc::new(Mutex::new(OnceCell::new())),
         }
     }
 }
@@ -721,19 +721,61 @@ impl EncryptedStartup for EncryptedMatrixServer {
         self.helper.bob_secret_key.public_key()
     }
 
-    async fn start(
+    async fn load_cipher(
         self,
         _context: tarpc::context::Context,
         encryption_key_ciphertext: Vec<u8>,
         nonce: Vec<u8>,
-    ) -> Result<(), String> {
+    ) -> Result<SessionState, String> {
         let decryption_result = self.helper.decrypt(encryption_key_ciphertext, nonce).await;
         match decryption_result {
             Ok(encryption_key) => {
-                let task = tokio::spawn(start_server(encryption_key));
-                Ok(())
+                let key = Key::<Aes256Gcm>::from_slice(&encryption_key);
+                let cipher = Aes256Gcm::new(&key);
+                match self.cipher.lock().await.set(cipher) {
+                    Ok(()) => match self.session_file.exists() {
+                        true => Ok(SessionState::SessionExists),
+                        false => Ok(SessionState::SessionMissing),
+                    },
+                    Err(_) => Err(String::from("Writing cipher failed")),
+                }
             }
             Err(_) => Err(String::from("Decrypting the message failed")),
+        }
+    }
+
+    async fn start(self, _: tarpc::context::Context) -> Result<(), String> {
+        if self.session_file.exists() {
+            if let Some(cipher) = self.cipher.lock().await.get() {
+                let client = match restore_session(&self.session_file, cipher).await {
+                    Ok(client) => client,
+                    Err(_) => return Err(String::from("Loading client session failed")),
+                };
+
+                let (tx, rx): (Sender<String>, Receiver<String>) =
+                    mpsc::channel(CHANNEL_BUFFER_SIZE);
+
+                tokio::spawn(matrix_room_bot(
+                    client.to_owned(),
+                    rx,
+                    self.config.matrix_room_id.to_owned(),
+                ));
+                tokio::spawn(mail_server(
+                    tx,
+                    self.config.mail_from.to_owned(),
+                    self.config.mail_to.to_owned(),
+                    self.config.mail_server_name.to_owned(),
+                ));
+                tokio::spawn(sync_client(client.to_owned()));
+
+                Ok(())
+            } else {
+                Err(String::from("No cipher available. Load cipher first"))
+            }
+        } else {
+            Err(String::from(
+                "Session file does not exist - authenticate the client first",
+            ))
         }
     }
 }
@@ -749,13 +791,6 @@ async fn main() -> anyhow::Result<()> {
 
     let data = fs::read_to_string(config_path).await?;
     let config: Config = serde_json::from_str(&data)?;
-    match CONFIG.set(config) {
-        Ok(()) => debug!("Writing Config to OnceLock was successful"),
-        Err(_) => {
-            error!("Writing Config to OnceLock failed");
-            exit(1)
-        }
-    };
 
     // start service
     let server_addr = (IpAddr::V4(Ipv4Addr::LOCALHOST), 20000);
@@ -767,7 +802,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("listener.next(): Option contains None")??;
 
-    let encrypted_matrix_server = EncryptedMatrixServer::new(None);
+    let encrypted_matrix_server = EncryptedMatrixServer::new(None, config);
 
     BaseChannel::with_defaults(transport)
         .execute(EncryptedMatrixServer::serve(encrypted_matrix_server))
