@@ -23,12 +23,6 @@ pub trait EncryptedStartup {
         nonce: Vec<u8>,
     ) -> Result<SessionState, String>;
 
-    /// getting interactive cross signing request
-    async fn get_cross_signing_symbols();
-
-    /// answering the request if the symbols match
-    async fn confirm_cross_signing_symbols();
-
     /// simple start
     async fn start() -> Result<(), String>;
 }
@@ -69,8 +63,6 @@ impl EncryptedStartupHelper {
                 let Some(first_chunk) = encrypted_vec.first_chunk::<32>() else {
                     return Err("Wrong encryption key length");
                 };
-
-                drop(cha_cha_box);
 
                 Ok(first_chunk.to_owned())
             }

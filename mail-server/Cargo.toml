@@ -1,0 +1,11 @@
+[package]
+name = "mail-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+log = { workspace = true }
+mailin = { workspace = true }
+mail-parser = { workspace = true }
+tokio = { workspace = true }

@@ -3,22 +3,33 @@ name = "email-to-matrix"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "etm-microservice"
+test = false
+
+[[bin]]
+name = "etm-session-builder"
+test = false
+
+[lib]
+name = "config"
+
 [dependencies]
-crypto_box = { workspace = true }
-serde_json = { workspace = true } 
-serde = { workspace = true }
+aes-gcm = { workspace = true }
 anyhow = { workspace = true }
+crypto_box = { workspace = true }
+encrypted-startup = { path = "../encrypted-startup" }
+env_logger = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
+log = { workspace = true }
+mail-server = { path = "../mail-server" }
 matrix-sdk = { workspace = true }
+rand = { workspace = true }
+retry = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true } 
+tarpc = { workspace = true }
 tokio = { workspace = true }
 url = { workspace = true }
-rand = { workspace = true }
-mailin = { workspace = true }
-retry = { workspace = true }
-aes-gcm = { workspace = true }
-log = { workspace = true }
-env_logger = { workspace = true }
-mail-parser = { workspace = true }
-tarpc = { workspace = true }
-encrypted-startup = { path = "../encrypted-startup" }
+

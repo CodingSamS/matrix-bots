@@ -778,8 +778,7 @@ dependencies = [
  "futures",
  "futures-util",
  "log",
- "mail-parser",
- "mailin",
+ "mail-server",
  "matrix-sdk",
  "rand",
  "retry",
@@ -1612,6 +1611,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93c3b9e5d8b17faf573330bbc43b37d6e918c0a3bf8a88e7d0a220ebc84af9fc"
 dependencies = [
  "encoding_rs",
+]
+
+[[package]]
+name = "mail-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "mail-parser",
+ "mailin",
+ "tokio",
 ]
 
 [[package]]

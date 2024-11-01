@@ -44,8 +44,10 @@ async fn main() {
     let ciphertext = alice_box.encrypt(&nonce, args.message.as_bytes()).unwrap();
 
     client
-        .start(context::current(), ciphertext, nonce.to_vec())
+        .load_cipher(context::current(), ciphertext, nonce.to_vec())
         .await
         .unwrap()
-        .unwrap()
+        .unwrap();
+
+    client.start(context::current()).await.unwrap().unwrap()
 }
