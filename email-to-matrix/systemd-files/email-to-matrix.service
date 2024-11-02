@@ -1,7 +1,11 @@
+[Unit]
+Description=Email-to-Matrix Microservice
+
 [Service]
+Type=simple
+Restart=always
 Environment="RUST_LOG=info"
 ExecStart=/path/to/email-to-matrix <path to config file>
-Sockets=email-to-matrix.socket
-StandardInput=socket
-StandardOutput=journal
-StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 [workspace]
-members = [ "email-to-matrix", "encrypted-message", "encrypted-sender", "encrypted-startup", "encryption-helper", "mail-server"]
+members = [ "email-to-matrix", "encrypted-sender", "encrypted-startup", "encrypted-string", "encryption-helper", "mail-server", "matrix-util"]
 resolver = "2"
 
 [workspace.dependencies]

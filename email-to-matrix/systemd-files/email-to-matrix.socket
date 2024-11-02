@@ -1,3 +1,0 @@
-[Socket]
-ListenFIFO=%t/email-to-matrix.stdin
-Service=email-to-matrix.service

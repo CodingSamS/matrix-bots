@@ -1,28 +1,26 @@
-use std::{
-    env,
-    net::{IpAddr, Ipv4Addr},
-    path::{Path, PathBuf},
-    process::exit,
-    sync::Arc,
-};
-
+use aes_gcm::{aead::KeyInit, Aes256Gcm, Key};
 use anyhow::{bail, Context};
-use config::{Config, FullSession};
+use config::Config;
 use crypto_box::PublicKey;
 use encrypted_startup::{EncryptedStartup, EncryptedStartupHelper, SessionState};
 use futures::prelude::Future;
 use futures_util::stream::StreamExt;
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use mail_server::mail_server;
 use matrix_sdk::{
     config::SyncSettings,
     ruma::{events::room::message::RoomMessageEventContent, RoomId},
     Client,
 };
-use retry::delay::Fixed;
-use retry::retry;
-
-use aes_gcm::{aead::KeyInit, Aes256Gcm, Key};
+use matrix_util::restore_session;
+use retry::{delay::Fixed, retry};
+use std::{
+    env,
+    net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
+    process::exit,
+    sync::Arc,
+};
 use tarpc::{
     serde_transport::tcp,
     server::{BaseChannel, Channel},
@@ -38,37 +36,6 @@ use tokio::{
 };
 
 const CHANNEL_BUFFER_SIZE: usize = 100;
-
-/// Restore a previous session.
-async fn restore_session(session_file: &Path, cipher: &Aes256Gcm) -> anyhow::Result<Client> {
-    info!(
-        "Previous session found in '{}'",
-        session_file.to_string_lossy()
-    );
-
-    // The session was serialized as JSON in a file.
-    let serialized_session = fs::read_to_string(session_file).await?;
-    let FullSession {
-        client_session,
-        user_session,
-    } = serde_json::from_str(&serialized_session)?;
-
-    // Build the client with the previous settings from the session.
-    let passphrase = client_session.passphrase.get_decrypted_string(cipher)?;
-
-    let client = Client::builder()
-        .homeserver_url(&client_session.homeserver)
-        .sqlite_store(&client_session.db_path, Some(&passphrase))
-        .build()
-        .await?;
-
-    info!("Restoring session for {}…", user_session.meta.user_id);
-
-    // Restore the Matrix user session.
-    client.restore_session(user_session).await?;
-
-    Ok(client)
-}
 
 async fn matrix_room_bot(
     client: Client,

@@ -774,19 +774,19 @@ dependencies = [
  "anyhow",
  "crypto_box",
  "encrypted-startup",
+ "encrypted-string",
  "env_logger",
  "futures",
  "futures-util",
  "log",
  "mail-server",
  "matrix-sdk",
- "rand",
+ "matrix-util",
  "retry",
  "serde",
  "serde_json",
  "tarpc",
  "tokio",
- "url",
 ]
 
 [[package]]
@@ -796,13 +796,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b45de904aa0b010bce2ab45264d0631681847fa7b6f2eaa7dab7619943bc4f59"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "encrypted-message"
-version = "0.1.0"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -824,6 +817,15 @@ dependencies = [
  "serde",
  "tarpc",
  "tokio",
+]
+
+[[package]]
+name = "encrypted-string"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "serde",
 ]
 
 [[package]]
@@ -1864,6 +1866,22 @@ dependencies = [
  "sha2",
  "thiserror",
  "zeroize",
+]
+
+[[package]]
+name = "matrix-util"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "encrypted-string",
+ "futures-util",
+ "log",
+ "matrix-sdk",
+ "rand",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
