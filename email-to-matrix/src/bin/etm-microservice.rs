@@ -5,7 +5,7 @@ use crypto_box::PublicKey;
 use encrypted_startup::{EncryptedStartup, EncryptedStartupHelper, SessionState};
 use futures::prelude::Future;
 use futures_util::stream::StreamExt;
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use mail_server::mail_server;
 use matrix_sdk::{
     config::SyncSettings,
@@ -14,17 +14,11 @@ use matrix_sdk::{
 };
 use matrix_util::restore_session;
 use retry::{delay::Fixed, retry};
-use std::{
-    env,
-    net::{IpAddr, Ipv4Addr},
-    path::PathBuf,
-    process::exit,
-    sync::Arc,
-};
+use std::{env, path::PathBuf, process::exit, sync::Arc};
 use tarpc::{
     serde_transport::tcp,
     server::{BaseChannel, Channel},
-    tokio_serde::formats::Json,
+    tokio_serde::formats::Bincode,
 };
 use tokio::{
     fs,
@@ -212,9 +206,9 @@ async fn main() -> anyhow::Result<()> {
     let config: Config = serde_json::from_str(&data)?;
 
     // start service
-    let server_addr = (IpAddr::V4(Ipv4Addr::LOCALHOST), 20000);
+    info!("Starting Server");
 
-    let mut listener = tcp::listen(&server_addr, Json::default).await?;
+    let mut listener = tcp::listen(&config.microservice_socket, Bincode::default).await?;
     listener.config_mut().max_frame_length(usize::MAX);
     let transport = listener
         .next()

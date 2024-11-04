@@ -5,7 +5,7 @@ use crypto_box::{
 };
 use encrypted_startup::EncryptedStartupClient;
 use std::net::SocketAddr;
-use tarpc::{client, context, tokio_serde::formats::Json};
+use tarpc::{client, context, tokio_serde::formats::Bincode};
 
 /// A program to send an encrypted message to an receiver
 #[derive(Parser, Debug)]
@@ -24,7 +24,7 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    let mut transport = tarpc::serde_transport::tcp::connect(args.server_addr, Json::default);
+    let mut transport = tarpc::serde_transport::tcp::connect(args.server_addr, Bincode::default);
     transport.config_mut().max_frame_length(usize::MAX);
 
     let client =
