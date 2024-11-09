@@ -26,6 +26,7 @@ use tokio::{
         mpsc::{self, Receiver, Sender},
         Mutex, OnceCell,
     },
+    task::JoinHandle,
     time::Duration,
 };
 
@@ -52,10 +53,12 @@ async fn matrix_room_bot(
         }
     };
 
+    debug!("start test send");
     // test send
     test_room
         .send(RoomMessageEventContent::text_plain("let's PARTY!!"))
         .await?;
+    debug!("finished test send");
 
     // listen for events to send
     loop {
@@ -98,6 +101,7 @@ async fn matrix_room_bot(
 
 async fn sync_client(client: Client) -> anyhow::Result<()> {
     let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
+    debug!("start sync");
     client.sync(sync_settings).await?;
     warn!("sync finished");
     Ok(())
@@ -113,6 +117,9 @@ struct EncryptedMatrixServer {
     session_file: Arc<PathBuf>,
     config: Arc<Config>,
     cipher: Arc<Mutex<OnceCell<Aes256Gcm>>>,
+    mail_server_handle: Arc<Mutex<OnceCell<JoinHandle<anyhow::Result<()>>>>>,
+    matrix_bot_handle: Arc<Mutex<OnceCell<JoinHandle<anyhow::Result<()>>>>>,
+    matrix_sync_handle: Arc<Mutex<OnceCell<JoinHandle<anyhow::Result<()>>>>>,
 }
 
 impl EncryptedMatrixServer {
@@ -122,6 +129,9 @@ impl EncryptedMatrixServer {
             session_file: Arc::new(config.matrix_data_dir.join("session").to_owned()),
             config: Arc::new(config),
             cipher: Arc::new(Mutex::new(OnceCell::new())),
+            mail_server_handle: Arc::new(Mutex::new(OnceCell::new())),
+            matrix_bot_handle: Arc::new(Mutex::new(OnceCell::new())),
+            matrix_sync_handle: Arc::new(Mutex::new(OnceCell::new())),
         }
     }
 }
@@ -162,28 +172,42 @@ impl EncryptedStartup for EncryptedMatrixServer {
     async fn start(self, _: tarpc::context::Context) -> Result<(), String> {
         if self.session_file.exists() {
             if let Some(cipher) = self.cipher.lock().await.get() {
-                let client = match restore_session(&self.session_file, cipher).await {
-                    Ok(client) => client,
-                    Err(_) => return Err(String::from("Loading client session failed")),
-                };
+                if !self.mail_server_handle.lock().await.initialized()
+                    && !self.matrix_bot_handle.lock().await.initialized()
+                    && !self.matrix_sync_handle.lock().await.initialized()
+                {
+                    let client = match restore_session(&self.session_file, cipher).await {
+                        Ok(client) => client,
+                        Err(_) => return Err(String::from("Loading client session failed")),
+                    };
 
-                let (tx, rx): (Sender<String>, Receiver<String>) =
-                    mpsc::channel(CHANNEL_BUFFER_SIZE);
+                    info!("Session restored successfully");
 
-                tokio::spawn(matrix_room_bot(
-                    client.to_owned(),
-                    rx,
-                    self.config.matrix_room_id.to_owned(),
-                ));
-                tokio::spawn(mail_server(
-                    tx,
-                    self.config.mail_from.to_owned(),
-                    self.config.mail_to.to_owned(),
-                    self.config.mail_server_name.to_owned(),
-                ));
-                tokio::spawn(sync_client(client.to_owned()));
+                    let (tx, rx): (Sender<String>, Receiver<String>) =
+                        mpsc::channel(CHANNEL_BUFFER_SIZE);
 
-                Ok(())
+                    let handle = tokio::spawn(matrix_room_bot(
+                        client.to_owned(),
+                        rx,
+                        self.config.matrix_room_id.to_owned(),
+                    ));
+                    self.mail_server_handle.lock().await.set(handle).unwrap();
+
+                    let handle = tokio::spawn(mail_server(
+                        tx,
+                        self.config.mail_from.to_owned(),
+                        self.config.mail_to.to_owned(),
+                        self.config.mail_server_name.to_owned(),
+                    ));
+                    self.matrix_bot_handle.lock().await.set(handle).unwrap();
+
+                    let handle = tokio::spawn(sync_client(client));
+                    self.matrix_sync_handle.lock().await.set(handle).unwrap();
+
+                    Ok(())
+                } else {
+                    Err(String::from("Server already started"))
+                }
             } else {
                 Err(String::from("No cipher available. Load cipher first"))
             }
@@ -221,6 +245,11 @@ async fn main() -> anyhow::Result<()> {
         .execute(EncryptedMatrixServer::serve(encrypted_matrix_server))
         .for_each(spawn)
         .await;
+
+    info!("Executing main finished");
+
+    // this loop fixes it somehow. to do: prevent the microservice from exiting!
+    loop {}
 
     Ok(())
 }
