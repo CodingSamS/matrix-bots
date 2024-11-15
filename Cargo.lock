@@ -767,29 +767,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
-name = "email-to-matrix"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "crypto_box",
- "encrypted-startup",
- "encrypted-string",
- "env_logger",
- "futures",
- "futures-util",
- "log",
- "mail-server",
- "matrix-sdk",
- "matrix-util",
- "retry",
- "serde",
- "serde_json",
- "tarpc",
- "tokio",
-]
-
-[[package]]
 name = "encoding_rs"
 version = "0.8.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -815,7 +792,6 @@ name = "encrypted-startup"
 version = "0.1.0"
 dependencies = [
  "crypto_box",
- "serde",
  "tarpc",
  "tokio",
 ]
@@ -1670,6 +1646,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "matrix-room-bot"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "crypto_box",
+ "encrypted-startup",
+ "encrypted-string",
+ "env_logger",
+ "futures",
+ "futures-util",
+ "log",
+ "matrix-sdk",
+ "matrix-util",
+ "serde",
+ "serde_json",
+ "tarpc",
+ "tokio",
+]
+
+[[package]]
 name = "matrix-sdk"
 version = "0.7.1"
 source = "git+https://github.com/matrix-org/matrix-rust-sdk#019d198af8e369859507295fce80a7d6f4760109"
@@ -2423,15 +2420,6 @@ dependencies = [
  "wasm-streams",
  "web-sys",
  "windows-registry",
-]
-
-[[package]]
-name = "retry"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9166d72162de3575f950507683fac47e30f6f2c3836b71b7fbc61aa517c9c5f4"
-dependencies = [
- "rand",
 ]
 
 [[package]]

@@ -1,15 +1,7 @@
 [package]
-name = "email-to-matrix"
+name = "mail-bot"
 version = "0.1.0"
 edition = "2021"
-
-[[bin]]
-name = "etm-microservice"
-test = false
-
-[[bin]]
-name = "etm-session-builder"
-test = false
 
 [lib]
 name = "config"

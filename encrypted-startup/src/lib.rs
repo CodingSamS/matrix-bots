@@ -2,33 +2,8 @@ use crypto_box::{
     aead::{Aead, OsRng},
     ChaChaBox, Nonce, PublicKey, SecretKey,
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-#[derive(Serialize, Deserialize, Debug)]
-pub enum SessionState {
-    SessionExists,
-    SessionMissing,
-}
-
-#[tarpc::service]
-pub trait EncryptedStartup {
-    /// Receives the public key of the other side, processes it, and responds with the own one
-    async fn sync_public_keys(alice_public_key: PublicKey) -> PublicKey;
-
-    /// Loads the session for the client. sync_public_keys needs to be done beforehand. returns if it needs to restore or do interactive cross signing
-    async fn load_cipher(
-        encryption_key_ciphertext: Vec<u8>,
-        nonce: Vec<u8>,
-    ) -> Result<SessionState, String>;
-
-    /// simple start
-    async fn start() -> Result<(), String>;
-
-    /// stop the application
-    async fn stop() -> Result<(), String>;
-}
 
 #[derive(Clone)]
 pub struct EncryptedStartupHelper {

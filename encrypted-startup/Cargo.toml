@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 crypto_box = { workspace = true }
-serde = { workspace = true}
 tarpc = { workspace = true }
 tokio = { workspace = true }
 

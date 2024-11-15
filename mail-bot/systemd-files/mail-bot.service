@@ -1,0 +1,11 @@
+[Unit]
+Description=Mail Bot Service
+
+[Service]
+Type=simple
+Restart=always
+Environment="RUST_LOG=info"
+ExecStart=/path/to/mail-bot <path to config file>
+
+[Install]
+WantedBy=multi-user.target

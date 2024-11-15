@@ -1,0 +1,30 @@
+[package]
+name = "matrix-room-bot"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "mrb-microservice"
+test = false
+
+[[bin]]
+name = "mrb-session-builder"
+test = false
+
+[dependencies]
+aes-gcm = { workspace = true }
+anyhow = { workspace = true }
+crypto_box = { workspace = true }
+encrypted-startup = { path = "../encrypted-startup" }
+encrypted-string = { path = "../encrypted-string" }
+env_logger = { workspace = true }
+futures = { workspace = true }
+futures-util = { workspace = true }
+log = { workspace = true }
+matrix-sdk = { workspace = true }
+matrix-util = { path = "../matrix-util" }
+serde = { workspace = true }
+serde_json = { workspace = true } 
+tarpc = { workspace = true }
+tokio = { workspace = true }
+
