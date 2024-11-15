@@ -9,14 +9,14 @@ anyhow = "1.0.86"
 futures-util = "0.3.30"
 #matrix-sdk = "0.7.1"
 matrix-sdk = { git = "https://github.com/matrix-org/matrix-rust-sdk"}
-tokio = {version = "1.39.2",  features = ["macros", "rt-multi-thread", "io-std", "net"]}
+tokio = { version = "1.39.2",  features = ["macros", "rt-multi-thread", "io-std", "net"]}
 tokio-serde = { version = "0.9.0", features = ["bincode"] }
 tokio-util = { version = "0.7.12", features = ["codec"] }
 futures = "0.3"
 tarpc = { version = "0.34", features = ["full"] }
 url = "2.5.2"
 rand = { version = "0.8.5", features = ["getrandom"] }
-mailin = "0.6.4"
+mailin = "0.6.5"
 retry = "2.0.0"
 aes-gcm = "0.10.3"
 log = "0.4.22"

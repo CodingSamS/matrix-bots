@@ -1,9 +1,9 @@
 use aes_gcm::{aead::KeyInit, Aes256Gcm, Key};
-use anyhow::{bail, Context};
+use anyhow::bail;
 use config::Config;
 use crypto_box::PublicKey;
 use encrypted_startup::{EncryptedStartup, EncryptedStartupHelper, SessionState};
-use futures::prelude::Future;
+use futures::{future, prelude::Future};
 use futures_util::stream::StreamExt;
 use log::{debug, error, info, warn};
 use mail_server::mail_server;
@@ -22,25 +22,19 @@ use tarpc::{
 };
 use tokio::{
     fs,
-    sync::{
-        mpsc::{self, Receiver, Sender},
-        Mutex, OnceCell,
-    },
+    sync::{mpsc, Mutex, OnceCell},
     task::JoinHandle,
-    time::Duration,
+    time::{sleep, Duration},
 };
 
 const CHANNEL_BUFFER_SIZE: usize = 100;
 
 async fn matrix_room_bot(
     client: Client,
-    mut rx: Receiver<String>,
+    mut rx: mpsc::Receiver<String>,
     room_id: Box<RoomId>,
 ) -> anyhow::Result<()> {
-    //   let room_id = &CONFIG.get().context("no config")?.matrix_room_id.clone();
-
-    // remove this room variable and the test send later
-    let test_room = match retry(Fixed::from_millis(5000).take(12), || {
+    let room = match retry(Fixed::from_millis(5000).take(12), || {
         match client.get_room(&room_id) {
             Some(room) => Ok(room),
             None => Err("room not found"),
@@ -53,12 +47,14 @@ async fn matrix_room_bot(
         }
     };
 
+    /*
     debug!("start test send");
     // test send
     test_room
         .send(RoomMessageEventContent::text_plain("let's PARTY!!"))
         .await?;
     debug!("finished test send");
+    */
 
     // listen for events to send
     loop {
@@ -66,29 +62,15 @@ async fn matrix_room_bot(
         match rx.recv().await {
             Some(message) => {
                 debug!("matrix room boot received message");
-                match retry(Fixed::from_millis(5000).take(12), || {
-                    match client.get_room(&room_id) {
-                        Some(room) => Ok(room),
-                        None => Err("room not found"),
-                    }
-                }) {
-                    Ok(room) => {
-                        debug!("room found");
-                        match room
-                            .send(RoomMessageEventContent::text_plain(&message))
-                            .await
-                        {
-                            Ok(_) => debug!("message sent successfully to matrix room"),
-                            Err(error) => error!(
-                                "sending message to matrix room failed with error: {}",
-                                error
-                            ),
-                        };
-                    }
-                    Err(_) => {
-                        error!("Finding the room failed");
-                        exit(1)
-                    }
+                match room
+                    .send(RoomMessageEventContent::text_plain(&message))
+                    .await
+                {
+                    Ok(_) => debug!("message sent successfully to matrix room"),
+                    Err(error) => error!(
+                        "sending message to matrix room failed with error: {}",
+                        error
+                    ),
                 };
             }
             None => {
@@ -109,6 +91,12 @@ async fn sync_client(client: Client) -> anyhow::Result<()> {
 
 async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
     tokio::spawn(fut);
+}
+
+async fn exit_with_delay(delay: u64) {
+    info!("shutting down in 10 seconds");
+    sleep(Duration::from_secs(delay)).await;
+    exit(0);
 }
 
 #[derive(Clone)]
@@ -183,7 +171,7 @@ impl EncryptedStartup for EncryptedMatrixServer {
 
                     info!("Session restored successfully");
 
-                    let (tx, rx): (Sender<String>, Receiver<String>) =
+                    let (tx, rx): (mpsc::Sender<String>, mpsc::Receiver<String>) =
                         mpsc::channel(CHANNEL_BUFFER_SIZE);
 
                     let handle = tokio::spawn(matrix_room_bot(
@@ -215,6 +203,11 @@ impl EncryptedStartup for EncryptedMatrixServer {
             Err(String::from("Session file does not exist"))
         }
     }
+
+    async fn stop(self, _: tarpc::context::Context) -> Result<(), String> {
+        tokio::spawn(exit_with_delay(10));
+        Ok(())
+    }
 }
 
 #[tokio::main]
@@ -234,22 +227,23 @@ async fn main() -> anyhow::Result<()> {
 
     let mut listener = tcp::listen(&config.microservice_socket, Bincode::default).await?;
     listener.config_mut().max_frame_length(usize::MAX);
-    let transport = listener
-        .next()
-        .await
-        .context("listener.next(): Option contains None")??;
 
     let encrypted_matrix_server = EncryptedMatrixServer::new(None, config);
 
-    BaseChannel::with_defaults(transport)
-        .execute(EncryptedMatrixServer::serve(encrypted_matrix_server))
-        .for_each(spawn)
+    listener
+        // ignore accept errors
+        .filter_map(|r| future::ready(r.ok()))
+        .map(BaseChannel::with_defaults)
+        .map(|channel| {
+            channel
+                .execute(encrypted_matrix_server.clone().serve())
+                .for_each(spawn)
+        })
+        // max 10 channels
+        .buffer_unordered(10)
+        .for_each(|_| async {})
         .await;
 
     info!("Executing main finished");
-
-    // this loop fixes it somehow. to do: prevent the microservice from exiting!
-    loop {}
-
     Ok(())
 }

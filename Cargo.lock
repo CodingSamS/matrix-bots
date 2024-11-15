@@ -802,6 +802,7 @@ dependencies = [
 name = "encrypted-sender"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "crypto_box",
  "encrypted-startup",

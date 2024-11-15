@@ -37,10 +37,12 @@ impl<'a> MailHandler<'a> {
 impl<'a> mailin::Handler for MailHandler<'a> {
     fn helo(&mut self, _ip: IpAddr, _domain: &str) -> mailin::Response {
         (self.is_from_valid, self.is_to_valid) = (false, false);
+        debug!("helo received");
         mailin::response::OK
     }
 
     fn mail(&mut self, _ip: IpAddr, _domain: &str, from: &str) -> mailin::Response {
+        debug!("mail received");
         match from.contains(self.mail_from) {
             true => {
                 self.is_from_valid = true;
@@ -54,6 +56,7 @@ impl<'a> mailin::Handler for MailHandler<'a> {
     }
 
     fn rcpt(&mut self, to: &str) -> mailin::Response {
+        debug!("rcpt received");
         match to.contains(self.mail_to) {
             true => {
                 self.is_to_valid = true;
@@ -73,6 +76,7 @@ impl<'a> mailin::Handler for MailHandler<'a> {
         _is8bit: bool,
         _to: &[String],
     ) -> mailin::Response {
+        debug!("data_start received");
         match (self.is_from_valid, self.is_to_valid) {
             (true, true) => {
                 self.data = Vec::new();
@@ -102,6 +106,7 @@ impl<'a> mailin::Handler for MailHandler<'a> {
     }
 
     fn data_end(&mut self) -> mailin::Response {
+        debug!("data_end received");
         match (self.is_from_valid, self.is_to_valid) {
             (true, true) => {
                 let chat_message = match MessageParser::default().parse(&self.data) {

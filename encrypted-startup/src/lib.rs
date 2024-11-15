@@ -25,6 +25,9 @@ pub trait EncryptedStartup {
 
     /// simple start
     async fn start() -> Result<(), String>;
+
+    /// stop the application
+    async fn stop() -> Result<(), String>;
 }
 
 #[derive(Clone)]
