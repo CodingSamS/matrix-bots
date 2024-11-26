@@ -7,9 +7,7 @@ use futures_util::stream::StreamExt;
 use log::{debug, info, warn};
 use matrix_room_bot::{Config, MatrixRoomServer, SessionState};
 use matrix_sdk::{
-    config::SyncSettings,
-    ruma::{events::room::message::RoomMessageEventContent, RoomId},
-    Client,
+    config::SyncSettings, ruma::events::room::message::RoomMessageEventContent, Client,
 };
 use matrix_util::restore_session;
 use std::{env, path::PathBuf, process::exit, sync::Arc};
@@ -24,23 +22,6 @@ use tokio::{
     task::JoinHandle,
     time::{sleep, Duration},
 };
-
-const CHANNEL_BUFFER_SIZE: usize = 100;
-
-async fn send_matrix_room_message(
-    client: Client,
-    room_id: Box<RoomId>,
-    message: String,
-) -> anyhow::Result<()> {
-    match client.get_room(&room_id) {
-        Some(room) => {
-            room.send(RoomMessageEventContent::text_plain(message))
-                .await?;
-            Ok(())
-        }
-        None => bail!("room not found"),
-    }
-}
 
 async fn sync_client(client: OnceCell<Client>) -> anyhow::Result<()> {
     let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
@@ -153,6 +134,22 @@ impl MatrixRoomServer for Server {
     async fn stop(self, _: tarpc::context::Context) -> Result<(), String> {
         tokio::spawn(exit_with_delay(10));
         Ok(())
+    }
+
+    async fn send(self, _: tarpc::context::Context, message: String) -> Result<(), String> {
+        let Some(client) = self.client.get() else {
+            return Err(String::from("Client not initialised"));
+        };
+        let Some(room) = client.get_room(&self.config.matrix_room_id) else {
+            return Err(String::from("room not found"));
+        };
+        match room
+            .send(RoomMessageEventContent::text_plain(message))
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Err(String::from("Sending message to matrix room failed")),
+        }
     }
 }
 
