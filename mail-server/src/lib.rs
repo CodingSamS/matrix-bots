@@ -6,7 +6,6 @@ use std::net::IpAddr;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
-    sync::mpsc::Sender,
     time::Duration,
 };
 
@@ -15,6 +14,7 @@ const MAIL_HANDLER_SEND_MAX_RETRIES: u32 = 5;
 struct MailHandler<'a> {
     tx: Sender<String>,
     data: Vec<u8>,
+    data_string: Option<String>,
     is_from_valid: bool,
     is_to_valid: bool,
     mail_from: &'a String,
@@ -26,6 +26,7 @@ impl<'a> MailHandler<'a> {
         MailHandler {
             tx,
             data: Vec::new(),
+            data_string: None,
             is_from_valid: false,
             is_to_valid: false,
             mail_from,
@@ -155,7 +156,7 @@ async fn listen_to_mail_socket_and_send_to_tx(
     mail_from: &String,
     mail_to: &String,
     mail_server_name: &String,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<String>> {
     let handler = MailHandler::new(tx, mail_from, mail_to);
 
     let remote_addr = stream.peer_addr()?;
@@ -194,8 +195,7 @@ async fn listen_to_mail_socket_and_send_to_tx(
             }
         }
     }
-
-    Ok(())
+    Ok(handler.data_string)
 }
 
 pub async fn mail_server(
