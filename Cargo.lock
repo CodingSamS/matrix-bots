@@ -1584,6 +1584,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mail-bot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "log",
+ "mail-server",
+ "matrix-room-bot",
+ "serde",
+ "serde_json",
+ "tarpc",
+ "tokio",
+]
+
+[[package]]
 name = "mail-parser"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

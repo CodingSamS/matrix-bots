@@ -1,5 +1,5 @@
 [workspace]
-members = ["encrypted-sender", "encrypted-startup", "encrypted-string", "encryption-helper", "mail-server", "matrix-room-bot", "matrix-util"]
+members = ["encrypted-sender", "encrypted-startup", "encrypted-string", "encryption-helper", "mail-server", "mail-bot", "matrix-room-bot", "matrix-util"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -9,7 +9,7 @@ anyhow = "1.0.86"
 futures-util = "0.3.30"
 #matrix-sdk = "0.7.1"
 matrix-sdk = { git = "https://github.com/matrix-org/matrix-rust-sdk"}
-tokio = { version = "1.39.2",  features = ["macros", "rt-multi-thread", "io-std", "net"]}
+tokio = { version = "1.39.2",  features = ["macros", "rt-multi-thread", "io-std", "net", "io-util"]}
 tokio-serde = { version = "0.9.0", features = ["bincode"] }
 tokio-util = { version = "0.7.12", features = ["codec"] }
 futures = "0.3"

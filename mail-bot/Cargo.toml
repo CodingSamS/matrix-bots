@@ -3,23 +3,13 @@ name = "mail-bot"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-name = "config"
-
 [dependencies]
-aes-gcm = { workspace = true }
 anyhow = { workspace = true }
-crypto_box = { workspace = true }
-encrypted-startup = { path = "../encrypted-startup" }
-encrypted-string = { path = "../encrypted-string" }
+clap = { workspace = true }
 env_logger = { workspace = true }
-futures = { workspace = true }
-futures-util = { workspace = true }
 log = { workspace = true }
 mail-server = { path = "../mail-server" }
-matrix-sdk = { workspace = true }
-matrix-util = { path = "../matrix-util" }
-retry = { workspace = true }
+matrix-room-bot = { path = "../matrix-room-bot" }
 serde = { workspace = true }
 serde_json = { workspace = true } 
 tarpc = { workspace = true }
