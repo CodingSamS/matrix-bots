@@ -782,7 +782,7 @@ dependencies = [
  "anyhow",
  "clap",
  "crypto_box",
- "encrypted-startup",
+ "matrix-room-bot",
  "tarpc",
  "tokio",
 ]

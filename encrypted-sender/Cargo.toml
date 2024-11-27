@@ -7,6 +7,6 @@ edition = "2021"
 anyhow = { workspace = true }
 crypto_box = { workspace = true }
 clap = { workspace = true }
-encrypted-startup = { path = "../encrypted-startup" }
+matrix-room-bot = { path = "../matrix-room-bot" }
 tokio = { workspace = true }
 tarpc = { workspace = true }

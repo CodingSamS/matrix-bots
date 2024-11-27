@@ -1,7 +1,7 @@
 use aes_gcm::{aead::KeyInit, Aes256Gcm, Key};
 use anyhow::bail;
-use config::{Config, INITIAL_DEVICE_DISPLAY_NAME};
 use log::{info, warn};
+use matrix_room_bot::{Config, INITIAL_DEVICE_DISPLAY_NAME};
 use matrix_sdk::config::SyncSettings;
 use matrix_util::{login, restore_session};
 use std::env;

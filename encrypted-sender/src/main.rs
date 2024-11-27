@@ -4,7 +4,7 @@ use crypto_box::{
     aead::{Aead, AeadCore, OsRng},
     ChaChaBox, SecretKey,
 };
-use encrypted_startup::EncryptedStartupClient;
+use matrix_room_bot::MatrixRoomServerClient;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Bincode};
 
@@ -26,7 +26,7 @@ async fn start(args: &Args, restart: bool) -> anyhow::Result<()> {
     transport.config_mut().max_frame_length(usize::MAX);
 
     let mut client =
-        EncryptedStartupClient::new(client::Config::default(), transport.await?).spawn();
+        MatrixRoomServerClient::new(client::Config::default(), transport.await?).spawn();
 
     if restart {
         // stop the server first and wait a duration in order to let systemd restart it
@@ -40,7 +40,7 @@ async fn start(args: &Args, restart: bool) -> anyhow::Result<()> {
         transport = tarpc::serde_transport::tcp::connect(args.server_addr, Bincode::default);
         transport.config_mut().max_frame_length(usize::MAX);
 
-        client = EncryptedStartupClient::new(client::Config::default(), transport.await?).spawn();
+        client = MatrixRoomServerClient::new(client::Config::default(), transport.await?).spawn();
     }
 
     // generate random key
