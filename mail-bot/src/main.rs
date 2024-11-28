@@ -1,6 +1,6 @@
 use anyhow::bail;
 use clap::Parser;
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use mail_server::listen_to_mail_socket_and_return_mail_string;
 use matrix_room_bot::MatrixRoomServerClient;
 use std::net::SocketAddr;
@@ -49,6 +49,14 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn get_microservice_client(
+    microservice_socket: &SocketAddr,
+) -> anyhow::Result<MatrixRoomServerClient> {
+    let mut transport = tarpc::serde_transport::tcp::connect(microservice_socket, Bincode::default);
+    transport.config_mut().max_frame_length(usize::MAX);
+    Ok(MatrixRoomServerClient::new(tarpc::client::Config::default(), transport.await?).spawn())
+}
+
 async fn mail_server(
     mail_from: String,
     mail_to: String,
@@ -62,10 +70,7 @@ async fn mail_server(
         bail!("binding socket failed")
     };
 
-    let mut transport = tarpc::serde_transport::tcp::connect(microservice_socket, Bincode::default);
-    transport.config_mut().max_frame_length(usize::MAX);
-    let client =
-        MatrixRoomServerClient::new(tarpc::client::Config::default(), transport.await?).spawn();
+    let mut client = get_microservice_client(&microservice_socket).await?;
 
     while let Ok((stream, _)) = socket.accept().await {
         match listen_to_mail_socket_and_return_mail_string(
@@ -77,11 +82,20 @@ async fn mail_server(
         .await
         {
             Ok(message_option) => match message_option {
-                Some(message) => {
-                    if let Ok(Ok(_)) = client.send(tarpc::context::current(), message).await {
-                        debug!("send successful");
+                Some(message) => match client
+                    .send(tarpc::context::current(), message.clone())
+                    .await
+                {
+                    Ok(Ok(_)) => debug!("send successful"),
+                    _ => {
+                        info!("Sending failed. Rebuilding the client and trying again");
+                        client = get_microservice_client(&microservice_socket).await?;
+                        match client.send(tarpc::context::current(), message).await {
+                            Ok(Ok(_)) => info!("2nd try of sending successful"),
+                            _ => error!("sending message failed"),
+                        }
                     }
-                }
+                },
                 None => debug!("mail message is empty"),
             },
             Err(err) => warn!("failure processing message: {}", err),
