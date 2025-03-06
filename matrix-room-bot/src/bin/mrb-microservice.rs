@@ -1,5 +1,5 @@
 use aes_gcm::{aead::KeyInit, Aes256Gcm, Key};
-use anyhow::{bail, Context};
+use anyhow::bail;
 use crypto_box::PublicKey;
 use encrypted_startup::EncryptedStartupHelper;
 use futures::{future, prelude::Future};
@@ -23,14 +23,10 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-async fn sync_client(client: OnceCell<Client>) -> anyhow::Result<()> {
+async fn sync_client(client: Client) -> anyhow::Result<()> {
     let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
     debug!("start sync");
-    client
-        .get()
-        .context("client not initialised")?
-        .sync(sync_settings)
-        .await?;
+    client.sync(sync_settings).await?;
     warn!("sync finished");
     Ok(())
 }
@@ -107,17 +103,15 @@ impl MatrixRoomServer for Server {
                 if !self.matrix_sync_handle.lock().await.initialized() {
                     match restore_session(&self.session_file, cipher).await {
                         Ok(client) => {
-                            if self.client.set(client).is_err() {
+                            if self.client.set(client.to_owned()).is_err() {
                                 return Err(String::from("Storing Matrix Client failed"));
                             }
+                            let handle = tokio::spawn(sync_client(client));
+                            self.matrix_sync_handle.lock().await.set(handle).unwrap();
+                            info!("Session restored successfully");
                         }
                         Err(_) => return Err(String::from("Loading client session failed")),
                     };
-
-                    info!("Session restored successfully");
-
-                    let handle = tokio::spawn(sync_client(self.client));
-                    self.matrix_sync_handle.lock().await.set(handle).unwrap();
 
                     Ok(())
                 } else {

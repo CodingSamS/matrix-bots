@@ -1,5 +1,5 @@
 [workspace]
-members = ["encrypted-sender", "encrypted-startup", "encrypted-string", "encryption-helper", "mail-server", "mail-bot", "matrix-room-bot", "matrix-util"]
+members = ["encrypted-sender", "encrypted-startup", "encrypted-string", "encryption-helper", "mail-server", "mail-bot", "matrix-room-bot", "matrix-util", "opnsense-bot"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -16,6 +16,7 @@ futures = "0.3"
 tarpc = { version = "0.34", features = ["full"] }
 url = "2.5.2"
 rand = { version = "0.8.5", features = ["getrandom"] }
+reqwest = "0.11"
 mailin = "0.6.5"
 aes-gcm = "0.10.3"
 log = "0.4.22"

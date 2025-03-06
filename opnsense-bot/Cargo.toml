@@ -1,0 +1,14 @@
+[package]
+name = "opnsense-bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+matrix-room-bot = { path = "../matrix-room-bot" }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tarpc = { workspace = true }
+tokio = { workspace = true }

@@ -1,11 +1,11 @@
 [Unit]
-Description=Email-to-Matrix Microservice
+Description=Matrix Room Bot (Microservice for sending strings)
 
 [Service]
 Type=simple
 Restart=always
 Environment="RUST_LOG=info"
-ExecStart=/path/to/email-to-matrix <path to config file>
+ExecStart=/path/to/mrb <path to config file>
 
 [Install]
 WantedBy=multi-user.target
