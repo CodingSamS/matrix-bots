@@ -1,27 +1,28 @@
 [workspace]
-members = ["encrypted-sender", "encrypted-startup", "encrypted-string", "encryption-helper", "mail-server", "mail-bot", "matrix-room-bot", "matrix-util", "opnsense-bot"]
+members = ["encrypted-sender", "encrypted-startup", "encrypted-string", "encryption-helper", "mail-server", "mail-bot", "matrix-room-bot", "matrix-util", "opnsense-bot", "webhook-bot"]
 resolver = "2"
 
 [workspace.dependencies]
-serde_json = "1.0"
-serde = { version = "1.0", features = ["derive"] }
+aes-gcm = "0.10.3"
 anyhow = "1.0.86"
+axum = "0.8.1"
+clap = { version = "4.5.20", features = ["derive"] }
+crypto_box = { version = "0.9.1", features = ["chacha20", "serde"] }
+env_logger = "0.11.5"
+futures = "0.3"
 futures-util = "0.3.30"
+log = "0.4.22"
+mailin = "0.6.5"
+mail-parser = "0.9.3"
 #matrix-sdk = "0.7.1"
 matrix-sdk = { git = "https://github.com/matrix-org/matrix-rust-sdk"}
+rand = { version = "0.8.5", features = ["getrandom"] }
+reqwest = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tarpc = { version = "0.34", features = ["full"] }
 tokio = { version = "1.39.2",  features = ["macros", "rt-multi-thread", "io-std", "net", "io-util"]}
 tokio-serde = { version = "0.9.0", features = ["bincode"] }
 tokio-util = { version = "0.7.12", features = ["codec"] }
-futures = "0.3"
-tarpc = { version = "0.34", features = ["full"] }
 url = "2.5.2"
-rand = { version = "0.8.5", features = ["getrandom"] }
-reqwest = "0.11"
-mailin = "0.6.5"
-aes-gcm = "0.10.3"
-log = "0.4.22"
-env_logger = "0.11.5"
-mail-parser = "0.9.3"
-crypto_box = { version = "0.9.1", features = ["chacha20", "serde"] }
-clap = { version = "4.5.20", features = ["derive"] }
 
