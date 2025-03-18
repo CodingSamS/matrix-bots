@@ -1,0 +1,13 @@
+[package]
+name = "webhook-bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+matrix-room-bot = { path = "../matrix-room-bot" }
+serde = { workspace = true }
+tarpc = { workspace = true }
+tokio = { workspace = true }

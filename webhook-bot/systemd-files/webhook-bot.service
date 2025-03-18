@@ -1,0 +1,11 @@
+[Unit]
+Description=Webhook Bot Service
+
+[Service]
+Type=simple
+Restart=always
+Environment="RUST_LOG=info"
+ExecStart=/path/to/webhook-bot --webhook-socket <WEBHOOK_SOCKET> --microservice-socket <MICROSERVICE_SOCKET>
+
+[Install]
+WantedBy=multi-user.target
