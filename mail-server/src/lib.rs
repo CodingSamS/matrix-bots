@@ -1,31 +1,31 @@
 use anyhow::bail;
-use log::{debug, error, warn};
+use log::{debug, warn};
 use mail_parser::MessageParser;
 use mailin::SessionBuilder;
 use std::net::IpAddr;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::{TcpListener, TcpStream},
-    sync::mpsc::Sender,
-    time::Duration,
+    net::TcpStream,
 };
 
-const MAIL_HANDLER_SEND_MAX_RETRIES: u32 = 5;
-
-struct MailHandler<'a> {
-    tx: Sender<String>,
+struct MailHandler<'a, 'b> {
     data: Vec<u8>,
+    data_string: &'b mut Option<String>,
     is_from_valid: bool,
     is_to_valid: bool,
     mail_from: &'a String,
     mail_to: &'a String,
 }
 
-impl<'a> MailHandler<'a> {
-    fn new(tx: Sender<String>, mail_from: &'a String, mail_to: &'a String) -> Self {
+impl<'a, 'b> MailHandler<'a, 'b> {
+    fn new(
+        mail_from: &'a String,
+        mail_to: &'a String,
+        data_string: &'b mut Option<String>,
+    ) -> Self {
         MailHandler {
-            tx,
             data: Vec::new(),
+            data_string,
             is_from_valid: false,
             is_to_valid: false,
             mail_from,
@@ -34,7 +34,7 @@ impl<'a> MailHandler<'a> {
     }
 }
 
-impl<'a> mailin::Handler for MailHandler<'a> {
+impl<'a, 'b> mailin::Handler for MailHandler<'a, 'b> {
     fn helo(&mut self, _ip: IpAddr, _domain: &str) -> mailin::Response {
         (self.is_from_valid, self.is_to_valid) = (false, false);
         debug!("helo received");
@@ -109,10 +109,14 @@ impl<'a> mailin::Handler for MailHandler<'a> {
         debug!("data_end received");
         match (self.is_from_valid, self.is_to_valid) {
             (true, true) => {
-                let chat_message = match MessageParser::default().parse(&self.data) {
+                match MessageParser::default().parse(&self.data) {
                     Some(message) => match (message.subject(), message.body_text(0)) {
                         (Some(subject), Some(body)) => {
-                            format!("Subject: {}\n\n{}", subject.to_string(), body.to_string())
+                            *self.data_string = Some(format!(
+                                "Subject: {}\n\n{}",
+                                subject.to_string(),
+                                body.to_string()
+                            ));
                         }
                         _ => {
                             warn!("Could not parse subject or body from mail");
@@ -124,21 +128,6 @@ impl<'a> mailin::Handler for MailHandler<'a> {
                         return mailin::response::INTERNAL_ERROR;
                     }
                 };
-                for i in 1..=MAIL_HANDLER_SEND_MAX_RETRIES {
-                    match self.tx.try_send(chat_message.to_owned()) {
-                        Ok(_) => {
-                            debug!("send handler->matrix thread: successful");
-                            break;
-                        }
-                        Err(_) => {
-                            warn!(
-                                "send handler->matrix thread: failed (Try {}/{})",
-                                i, MAIL_HANDLER_SEND_MAX_RETRIES
-                            );
-                            std::thread::sleep(Duration::from_secs(5));
-                        }
-                    };
-                }
                 (self.is_from_valid, self.is_to_valid) = (false, false);
                 mailin::response::OK
             }
@@ -149,14 +138,15 @@ impl<'a> mailin::Handler for MailHandler<'a> {
         }
     }
 }
-async fn listen_to_mail_socket_and_send_to_tx(
-    tx: Sender<String>,
+
+pub async fn listen_to_mail_socket_and_return_mail_string(
     mut stream: TcpStream,
     mail_from: &String,
     mail_to: &String,
     mail_server_name: &String,
-) -> anyhow::Result<()> {
-    let handler = MailHandler::new(tx, mail_from, mail_to);
+) -> anyhow::Result<Option<String>> {
+    let mut data_string = None;
+    let handler = MailHandler::new(mail_from, mail_to, &mut data_string);
 
     let remote_addr = stream.peer_addr()?;
 
@@ -194,38 +184,5 @@ async fn listen_to_mail_socket_and_send_to_tx(
             }
         }
     }
-
-    Ok(())
-}
-
-pub async fn mail_server(
-    tx: Sender<String>,
-    mail_from: String,
-    mail_to: String,
-    mail_server_name: String,
-) -> anyhow::Result<()> {
-    // handling incoming connections
-    let Ok(socket) = TcpListener::bind("0.0.0.0:25000").await else {
-        error!("binding socket failed");
-        bail!("binding socket failed")
-    };
-
-    while let Ok((stream, _)) = socket.accept().await {
-        match listen_to_mail_socket_and_send_to_tx(
-            tx.clone(),
-            stream,
-            &mail_from,
-            &mail_to,
-            &mail_server_name,
-        )
-        .await
-        {
-            Ok(_) => (),
-            Err(err) => warn!("failure processing message: {}", err),
-        }
-    }
-
-    warn!("no incoming sockets left");
-
-    Ok(())
+    Ok(data_string)
 }

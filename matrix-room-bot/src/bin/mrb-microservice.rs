@@ -1,19 +1,15 @@
 use aes_gcm::{aead::KeyInit, Aes256Gcm, Key};
 use anyhow::bail;
-use config::Config;
 use crypto_box::PublicKey;
-use encrypted_startup::{EncryptedStartup, EncryptedStartupHelper, SessionState};
+use encrypted_startup::EncryptedStartupHelper;
 use futures::{future, prelude::Future};
 use futures_util::stream::StreamExt;
-use log::{debug, error, info, warn};
-use mail_server::mail_server;
+use log::{debug, info, warn};
+use matrix_room_bot::{Config, MatrixRoomServer, SessionState};
 use matrix_sdk::{
-    config::SyncSettings,
-    ruma::{events::room::message::RoomMessageEventContent, RoomId},
-    Client,
+    config::SyncSettings, ruma::events::room::message::RoomMessageEventContent, Client,
 };
 use matrix_util::restore_session;
-use retry::{delay::Fixed, retry};
 use std::{env, path::PathBuf, process::exit, sync::Arc};
 use tarpc::{
     serde_transport::tcp,
@@ -22,64 +18,10 @@ use tarpc::{
 };
 use tokio::{
     fs,
-    sync::{mpsc, Mutex, OnceCell},
+    sync::{Mutex, OnceCell},
     task::JoinHandle,
     time::{sleep, Duration},
 };
-
-const CHANNEL_BUFFER_SIZE: usize = 100;
-
-async fn matrix_room_bot(
-    client: Client,
-    mut rx: mpsc::Receiver<String>,
-    room_id: Box<RoomId>,
-) -> anyhow::Result<()> {
-    let room = match retry(Fixed::from_millis(5000).take(12), || {
-        match client.get_room(&room_id) {
-            Some(room) => Ok(room),
-            None => Err("room not found"),
-        }
-    }) {
-        Ok(room) => room,
-        Err(_) => {
-            error!("Finding the room failed");
-            exit(1)
-        }
-    };
-
-    /*
-    debug!("start test send");
-    // test send
-    test_room
-        .send(RoomMessageEventContent::text_plain("let's PARTY!!"))
-        .await?;
-    debug!("finished test send");
-    */
-
-    // listen for events to send
-    loop {
-        debug!("wait for event");
-        match rx.recv().await {
-            Some(message) => {
-                debug!("matrix room boot received message");
-                match room
-                    .send(RoomMessageEventContent::text_plain(&message))
-                    .await
-                {
-                    Ok(_) => debug!("message sent successfully to matrix room"),
-                    Err(error) => error!(
-                        "sending message to matrix room failed with error: {}",
-                        error
-                    ),
-                };
-            }
-            None => {
-                error!("Channel closed");
-                exit(1);
-            }
-        }
-    }
-}
 
 async fn sync_client(client: Client) -> anyhow::Result<()> {
     let sync_settings = SyncSettings::new().timeout(Duration::from_secs(900)); // timeout for sync requests: 15 Minutes
@@ -100,31 +42,29 @@ async fn exit_with_delay(delay: u64) {
 }
 
 #[derive(Clone)]
-struct EncryptedMatrixServer {
+struct Server {
     helper: EncryptedStartupHelper,
     session_file: Arc<PathBuf>,
     config: Arc<Config>,
+    client: Arc<Mutex<OnceCell<Client>>>,
     cipher: Arc<Mutex<OnceCell<Aes256Gcm>>>,
-    mail_server_handle: Arc<Mutex<OnceCell<JoinHandle<anyhow::Result<()>>>>>,
-    matrix_bot_handle: Arc<Mutex<OnceCell<JoinHandle<anyhow::Result<()>>>>>,
     matrix_sync_handle: Arc<Mutex<OnceCell<JoinHandle<anyhow::Result<()>>>>>,
 }
 
-impl EncryptedMatrixServer {
+impl Server {
     fn new(alice_public_key_option: Option<PublicKey>, config: Config) -> Self {
-        EncryptedMatrixServer {
+        Server {
             helper: EncryptedStartupHelper::new(alice_public_key_option),
             session_file: Arc::new(config.matrix_data_dir.join("session").to_owned()),
             config: Arc::new(config),
+            client: Arc::new(Mutex::new(OnceCell::new())),
             cipher: Arc::new(Mutex::new(OnceCell::new())),
-            mail_server_handle: Arc::new(Mutex::new(OnceCell::new())),
-            matrix_bot_handle: Arc::new(Mutex::new(OnceCell::new())),
             matrix_sync_handle: Arc::new(Mutex::new(OnceCell::new())),
         }
     }
 }
 
-impl EncryptedStartup for EncryptedMatrixServer {
+impl MatrixRoomServer for Server {
     async fn sync_public_keys(
         self,
         _: tarpc::context::Context,
@@ -160,37 +100,20 @@ impl EncryptedStartup for EncryptedMatrixServer {
     async fn start(self, _: tarpc::context::Context) -> Result<(), String> {
         if self.session_file.exists() {
             if let Some(cipher) = self.cipher.lock().await.get() {
-                if !self.mail_server_handle.lock().await.initialized()
-                    && !self.matrix_bot_handle.lock().await.initialized()
-                    && !self.matrix_sync_handle.lock().await.initialized()
-                {
-                    let client = match restore_session(&self.session_file, cipher).await {
-                        Ok(client) => client,
+                if !self.matrix_sync_handle.lock().await.initialized() {
+                    match restore_session(&self.session_file, cipher).await {
+                        Ok(client) => {
+                            if self.client.lock().await.set(client.to_owned()).is_err() {
+                                return Err(String::from("Storing Matrix Client failed"));
+                            }
+                            let handle = tokio::spawn(sync_client(client));
+                            if self.matrix_sync_handle.lock().await.set(handle).is_err() {
+                                return Err(String::from("Storing Matrix Sync handle failed"));
+                            };
+                            info!("Session restored successfully");
+                        }
                         Err(_) => return Err(String::from("Loading client session failed")),
                     };
-
-                    info!("Session restored successfully");
-
-                    let (tx, rx): (mpsc::Sender<String>, mpsc::Receiver<String>) =
-                        mpsc::channel(CHANNEL_BUFFER_SIZE);
-
-                    let handle = tokio::spawn(matrix_room_bot(
-                        client.to_owned(),
-                        rx,
-                        self.config.matrix_room_id.to_owned(),
-                    ));
-                    self.mail_server_handle.lock().await.set(handle).unwrap();
-
-                    let handle = tokio::spawn(mail_server(
-                        tx,
-                        self.config.mail_from.to_owned(),
-                        self.config.mail_to.to_owned(),
-                        self.config.mail_server_name.to_owned(),
-                    ));
-                    self.matrix_bot_handle.lock().await.set(handle).unwrap();
-
-                    let handle = tokio::spawn(sync_client(client));
-                    self.matrix_sync_handle.lock().await.set(handle).unwrap();
 
                     Ok(())
                 } else {
@@ -207,6 +130,23 @@ impl EncryptedStartup for EncryptedMatrixServer {
     async fn stop(self, _: tarpc::context::Context) -> Result<(), String> {
         tokio::spawn(exit_with_delay(10));
         Ok(())
+    }
+
+    async fn send(self, _: tarpc::context::Context, message: String) -> Result<(), String> {
+        let client_lock = self.client.lock().await;
+        let Some(client) = client_lock.get() else {
+            return Err(String::from("Client not initialised"));
+        };
+        let Some(room) = client.get_room(&self.config.matrix_room_id) else {
+            return Err(String::from("room not found"));
+        };
+        match room
+            .send(RoomMessageEventContent::text_plain(message))
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Err(String::from("Sending message to matrix room failed")),
+        }
     }
 }
 
@@ -228,7 +168,7 @@ async fn main() -> anyhow::Result<()> {
     let mut listener = tcp::listen(&config.microservice_socket, Bincode::default).await?;
     listener.config_mut().max_frame_length(usize::MAX);
 
-    let encrypted_matrix_server = EncryptedMatrixServer::new(None, config);
+    let encrypted_matrix_server = Server::new(None, config);
 
     listener
         // ignore accept errors

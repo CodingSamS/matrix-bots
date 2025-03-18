@@ -1,18 +1,15 @@
 [package]
-name = "email-to-matrix"
+name = "matrix-room-bot"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "etm-microservice"
+name = "mrb-microservice"
 test = false
 
 [[bin]]
-name = "etm-session-builder"
+name = "mrb-session-builder"
 test = false
-
-[lib]
-name = "config"
 
 [dependencies]
 aes-gcm = { workspace = true }
@@ -24,10 +21,8 @@ env_logger = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
-mail-server = { path = "../mail-server" }
 matrix-sdk = { workspace = true }
 matrix-util = { path = "../matrix-util" }
-retry = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true } 
 tarpc = { workspace = true }
