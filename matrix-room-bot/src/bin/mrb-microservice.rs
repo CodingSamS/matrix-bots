@@ -46,7 +46,7 @@ struct Server {
     helper: EncryptedStartupHelper,
     session_file: Arc<PathBuf>,
     config: Arc<Config>,
-    client: OnceCell<Client>,
+    client: Arc<Mutex<OnceCell<Client>>>,
     cipher: Arc<Mutex<OnceCell<Aes256Gcm>>>,
     matrix_sync_handle: Arc<Mutex<OnceCell<JoinHandle<anyhow::Result<()>>>>>,
 }
@@ -57,7 +57,7 @@ impl Server {
             helper: EncryptedStartupHelper::new(alice_public_key_option),
             session_file: Arc::new(config.matrix_data_dir.join("session").to_owned()),
             config: Arc::new(config),
-            client: OnceCell::new(),
+            client: Arc::new(Mutex::new(OnceCell::new())),
             cipher: Arc::new(Mutex::new(OnceCell::new())),
             matrix_sync_handle: Arc::new(Mutex::new(OnceCell::new())),
         }
@@ -103,11 +103,13 @@ impl MatrixRoomServer for Server {
                 if !self.matrix_sync_handle.lock().await.initialized() {
                     match restore_session(&self.session_file, cipher).await {
                         Ok(client) => {
-                            if self.client.set(client.to_owned()).is_err() {
+                            if self.client.lock().await.set(client.to_owned()).is_err() {
                                 return Err(String::from("Storing Matrix Client failed"));
                             }
                             let handle = tokio::spawn(sync_client(client));
-                            self.matrix_sync_handle.lock().await.set(handle).unwrap();
+                            if self.matrix_sync_handle.lock().await.set(handle).is_err() {
+                                return Err(String::from("Storing Matrix Sync handle failed"));
+                            };
                             info!("Session restored successfully");
                         }
                         Err(_) => return Err(String::from("Loading client session failed")),
@@ -131,7 +133,8 @@ impl MatrixRoomServer for Server {
     }
 
     async fn send(self, _: tarpc::context::Context, message: String) -> Result<(), String> {
-        let Some(client) = self.client.get() else {
+        let client_lock = self.client.lock().await;
+        let Some(client) = client_lock.get() else {
             return Err(String::from("Client not initialised"));
         };
         let Some(room) = client.get_room(&self.config.matrix_room_id) else {
