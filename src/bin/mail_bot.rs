@@ -1,11 +1,13 @@
 use anyhow::bail;
 use clap::Parser;
 use log::{debug, error, info, warn};
-use mail_server::listen_to_mail_socket_and_return_mail_string;
-use matrix_room_bot::MatrixRoomServerClient;
+use matrix_bots::{
+    mail_server::listen_to_mail_socket_and_return_mail_string,
+    matrix_room_server::{matrix_room_server_client::MatrixRoomServerClient, SendMessage},
+};
 use std::net::SocketAddr;
-use tarpc::tokio_serde::formats::Bincode;
 use tokio::net::TcpListener;
+use tonic::transport::Endpoint;
 
 #[derive(Parser, Debug)]
 #[command(name = "Mail Bot")]
@@ -28,7 +30,7 @@ struct Args {
     mail_server_socket: SocketAddr,
     /// Socket Address of the microservice
     #[arg(long)]
-    microservice_socket: SocketAddr,
+    microservice_socket: Endpoint,
 }
 
 #[tokio::main]
@@ -49,20 +51,12 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_microservice_client(
-    microservice_socket: &SocketAddr,
-) -> anyhow::Result<MatrixRoomServerClient> {
-    let mut transport = tarpc::serde_transport::tcp::connect(microservice_socket, Bincode::default);
-    transport.config_mut().max_frame_length(usize::MAX);
-    Ok(MatrixRoomServerClient::new(tarpc::client::Config::default(), transport.await?).spawn())
-}
-
 async fn mail_server(
     mail_from: String,
     mail_to: String,
     mail_server_name: String,
     mail_server_socket: SocketAddr,
-    microservice_socket: SocketAddr,
+    microservice_socket: Endpoint,
 ) -> anyhow::Result<()> {
     // handling incoming connections
     let Ok(socket) = TcpListener::bind(mail_server_socket).await else {
@@ -70,7 +64,7 @@ async fn mail_server(
         bail!("binding socket failed")
     };
 
-    let mut client = get_microservice_client(&microservice_socket).await?;
+    let mut client = MatrixRoomServerClient::connect(microservice_socket.to_owned()).await?;
 
     while let Ok((stream, _)) = socket.accept().await {
         match listen_to_mail_socket_and_return_mail_string(
@@ -83,15 +77,18 @@ async fn mail_server(
         {
             Ok(message_option) => match message_option {
                 Some(message) => match client
-                    .send(tarpc::context::current(), message.clone())
+                    .send(SendMessage {
+                        message: message.to_owned(),
+                    })
                     .await
                 {
-                    Ok(Ok(_)) => debug!("send successful"),
+                    Ok(_) => debug!("send successful"),
                     _ => {
                         info!("Sending failed. Rebuilding the client and trying again");
-                        client = get_microservice_client(&microservice_socket).await?;
-                        match client.send(tarpc::context::current(), message).await {
-                            Ok(Ok(_)) => info!("2nd try of sending successful"),
+                        client =
+                            MatrixRoomServerClient::connect(microservice_socket.to_owned()).await?;
+                        match client.send(SendMessage { message }).await {
+                            Ok(_) => info!("2nd try of sending successful"),
                             _ => error!("sending message failed"),
                         }
                     }

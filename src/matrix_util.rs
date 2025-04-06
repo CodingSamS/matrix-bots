@@ -1,6 +1,6 @@
+use crate::encrypted_string::EncryptedString;
 use aes_gcm::Aes256Gcm;
 use anyhow::Context;
-use encrypted_string::EncryptedString;
 use futures_util::stream::StreamExt;
 use log::info;
 use matrix_sdk::{

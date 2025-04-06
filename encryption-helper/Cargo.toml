@@ -1,7 +1,0 @@
-[package]
-name = "encryption-helper"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-aes-gcm = { workspace = true }

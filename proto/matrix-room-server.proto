@@ -1,27 +1,43 @@
-use crypto_box::PublicKey;
-use encrypted_string::EncryptedString;
-use matrix_sdk::ruma::RoomId;
-use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, path::PathBuf, str};
+syntax = "proto3";
+package matrix_room_server;
 
-pub const INITIAL_DEVICE_DISPLAY_NAME: &str = "Forward Room Bot";
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Config {
-    pub matrix_user: String,
-    pub matrix_password: EncryptedString,
-    pub matrix_homeserver: String,
-    pub matrix_room_id: Box<RoomId>,
-    pub matrix_data_dir: PathBuf,
-    pub microservice_socket: SocketAddr,
+service matrix_room_server {
+    rpc sync_public_keys(PublicKey) returns (PublicKey);
+    rpc load_cipher(EncryptionData) returns (SessionState);
+    rpc send(SendMessage) returns (Empty);
+    rpc start(Empty) returns (Empty);
+    rpc stop(Empty) returns (Empty);
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum SessionState {
+message PublicKey {
+    bytes public_key = 1;
+}
+
+message EncryptionData {
+    bytes encryption_key_ciphertext = 1;
+    bytes nonce = 2;
+}
+
+message SendMessage {
+    string message = 1;
+}
+
+message Empty {}
+
+enum SessionStateEnum {
+    SessionExists = 0;
+    SessionMissing = 1;
+}
+
+message SessionState {
+    optional SessionStateEnum session_state = 1;
+}
+
+
+
+/*
     SessionExists,
     SessionMissing,
-}
-
 #[tarpc::service]
 pub trait MatrixRoomServer {
     /// Receives the public key of the other side, processes it, and responds with the own one
@@ -42,3 +58,4 @@ pub trait MatrixRoomServer {
     /// stop the application
     async fn stop() -> Result<(), String>;
 }
+*/

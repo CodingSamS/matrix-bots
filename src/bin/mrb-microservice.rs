@@ -1,21 +1,16 @@
 use aes_gcm::{aead::KeyInit, Aes256Gcm, Key};
 use anyhow::bail;
 use crypto_box::PublicKey;
-use encrypted_startup::EncryptedStartupHelper;
 use futures::{future, prelude::Future};
 use futures_util::stream::StreamExt;
 use log::{debug, info, warn};
-use matrix_room_bot::{Config, MatrixRoomServer, SessionState};
+use matrix_bots::encrypted_startup::EncryptedStartupHelper;
+use matrix_bots::matrix_room_bot_config::Config;
+use matrix_bots::matrix_util::restore_session;
 use matrix_sdk::{
     config::SyncSettings, ruma::events::room::message::RoomMessageEventContent, Client,
 };
-use matrix_util::restore_session;
 use std::{env, path::PathBuf, process::exit, sync::Arc};
-use tarpc::{
-    serde_transport::tcp,
-    server::{BaseChannel, Channel},
-    tokio_serde::formats::Bincode,
-};
 use tokio::{
     fs,
     sync::{Mutex, OnceCell},

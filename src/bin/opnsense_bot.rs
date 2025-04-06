@@ -1,10 +1,13 @@
 use anyhow::bail;
 use clap::Parser;
-use matrix_room_bot::MatrixRoomServerClient;
+use matrix_bots::{
+    matrix_room_server::matrix_room_server_client::MatrixRoomServerClient,
+    matrix_room_server::SendMessage,
+};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use tarpc::tokio_serde::formats::Bincode;
+use tonic::transport::Endpoint;
 
 #[derive(Parser, Debug)]
 #[command(name = "OPNSense Bot")]
@@ -22,7 +25,7 @@ struct Args {
     opnsense_address: SocketAddr,
     /// Socket Address of the microservice
     #[arg(long)]
-    microservice_socket: SocketAddr,
+    microservice_socket: Endpoint,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -48,14 +51,6 @@ impl std::fmt::Display for Response {
     }
 }
 
-async fn get_microservice_client(
-    microservice_socket: &SocketAddr,
-) -> anyhow::Result<MatrixRoomServerClient> {
-    let mut transport = tarpc::serde_transport::tcp::connect(microservice_socket, Bincode::default);
-    transport.config_mut().max_frame_length(usize::MAX);
-    Ok(MatrixRoomServerClient::new(tarpc::client::Config::default(), transport.await?).spawn())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -76,16 +71,15 @@ async fn main() -> anyhow::Result<()> {
     match response.status() {
         StatusCode::OK => {
             let response_json: Response = serde_json::from_str(&response.text().await?)?;
-            println!("{}", response_json);
-            let matrix_client = get_microservice_client(&args.microservice_socket).await?;
-            matrix_client
-                .send(tarpc::context::current(), response_json.to_string())
-                .await?
-                .unwrap();
-            /*{
-                Ok(Ok(_)) => println!("2nd try of sending successful"),
-                _ => bail!("sending message failed"),
-            }*/
+
+            let mut client =
+                MatrixRoomServerClient::connect(args.microservice_socket.to_owned()).await?;
+
+            let request = tonic::Request::new(SendMessage {
+                message: response_json.to_string(),
+            });
+
+            client.send(request).await?;
         }
         _ => bail!("Error retrieving URL"),
     }

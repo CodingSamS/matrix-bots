@@ -1,8 +1,24 @@
-[workspace]
-members = ["encrypted-sender", "encrypted-startup", "encrypted-string", "encryption-helper", "mail-server", "mail-bot", "matrix-room-bot", "matrix-util", "opnsense-bot", "webhook-bot"]
-resolver = "2"
+[package]
+name = "matrix-bots"
+version = "0.2.0"
+edition = "2021"
 
-[workspace.dependencies]
+[[bin]]
+name = "encrypted_sender"
+[[bin]]
+name = "encryption_helper"
+[[bin]]
+name = "mail_bot"
+[[bin]]
+name = "mrb-microservice"
+[[bin]]
+name = "mrb-session-builder"
+[[bin]]
+name = "opnsense_bot"
+[[bin]]
+name = "webhook_bot"
+
+[dependencies]
 aes-gcm = "0.10.3"
 anyhow = "1.0.86"
 axum = "0.8.1"
@@ -16,13 +32,17 @@ mailin = "0.6.5"
 mail-parser = "0.9.3"
 #matrix-sdk = "0.7.1"
 matrix-sdk = { git = "https://github.com/matrix-org/matrix-rust-sdk"}
+prost = "0.13"
 rand = { version = "0.8.5", features = ["getrandom"] }
 reqwest = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tarpc = { version = "0.34", features = ["full"] }
 tokio = { version = "1.39.2",  features = ["macros", "rt-multi-thread", "io-std", "net", "io-util"]}
 tokio-serde = { version = "0.9.0", features = ["bincode"] }
 tokio-util = { version = "0.7.12", features = ["codec"] }
+tonic = "0.13.0"
 url = "2.5.2"
+
+[build-dependencies]
+tonic-build = "0.13.0"
 

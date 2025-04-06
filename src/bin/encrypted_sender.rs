@@ -1,12 +1,12 @@
-use anyhow::Context;
 use clap::Parser;
 use crypto_box::{
     aead::{Aead, AeadCore, OsRng},
     ChaChaBox, SecretKey,
 };
-use matrix_room_bot::MatrixRoomServerClient;
-use std::net::SocketAddr;
-use tarpc::{client, context, tokio_serde::formats::Bincode};
+use matrix_bots::matrix_room_server::{
+    matrix_room_server_client::MatrixRoomServerClient, Empty, EncryptionData, PublicKey,
+};
+use tonic::transport::Endpoint;
 
 /// A program to send an encrypted message to an receiver
 #[derive(Parser, Debug)]
@@ -18,54 +18,45 @@ struct Args {
 
     /// IP of receiver
     #[arg(short, long)]
-    server_addr: SocketAddr,
+    server_addr: Endpoint,
 }
 
 async fn start(args: &Args, restart: bool) -> anyhow::Result<()> {
-    let mut transport = tarpc::serde_transport::tcp::connect(args.server_addr, Bincode::default);
-    transport.config_mut().max_frame_length(usize::MAX);
-
-    let mut client =
-        MatrixRoomServerClient::new(client::Config::default(), transport.await?).spawn();
+    let mut client = MatrixRoomServerClient::connect(args.server_addr.to_owned()).await?;
 
     if restart {
         // stop the server first and wait a duration in order to let systemd restart it
-        client
-            .stop(context::current())
-            .await?
-            .ok()
-            .context("stop failed")?;
+        client.stop(tonic::Request::new(Empty {})).await?;
+
         tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
 
-        transport = tarpc::serde_transport::tcp::connect(args.server_addr, Bincode::default);
-        transport.config_mut().max_frame_length(usize::MAX);
-
-        client = MatrixRoomServerClient::new(client::Config::default(), transport.await?).spawn();
+        client = MatrixRoomServerClient::connect(args.server_addr.to_owned()).await?;
     }
 
     // generate random key
     let alice_secret_key = SecretKey::generate(&mut OsRng);
     let alice_public_key = alice_secret_key.public_key();
 
-    let bob_public_key = client
-        .sync_public_keys(context::current(), alice_public_key)
+    let response = client
+        .sync_public_keys(PublicKey {
+            public_key: alice_public_key.as_bytes().into(),
+        })
         .await?;
+
+    let bob_public_key = crypto_box::PublicKey::from_slice(&response.into_inner().public_key)?;
 
     let alice_box = ChaChaBox::new(&bob_public_key, &alice_secret_key);
     let nonce = ChaChaBox::generate_nonce(&mut OsRng);
     let ciphertext = alice_box.encrypt(&nonce, args.message.as_bytes())?;
 
     client
-        .load_cipher(context::current(), ciphertext, nonce.to_vec())
-        .await?
-        .ok()
-        .context("load cipher failed")?;
+        .load_cipher(EncryptionData {
+            encryption_key_ciphertext: ciphertext,
+            nonce: nonce.to_vec(),
+        })
+        .await?;
 
-    client
-        .start(context::current())
-        .await?
-        .ok()
-        .context("start failed")?;
+    client.start(Empty {}).await?;
 
     Ok(())
 }

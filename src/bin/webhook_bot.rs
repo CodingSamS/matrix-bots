@@ -1,9 +1,12 @@
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use clap::Parser;
-use matrix_room_bot::MatrixRoomServerClient;
+use matrix_bots::{
+    matrix_room_server::matrix_room_server_client::MatrixRoomServerClient,
+    matrix_room_server::SendMessage,
+};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
-use tarpc::tokio_serde::formats::Bincode;
+use tonic::transport::Endpoint;
 
 #[derive(Parser, Debug)]
 #[command(name = "Webhook Bot")]
@@ -15,7 +18,7 @@ struct Args {
     webhook_socket: SocketAddr,
     /// Socket Address of the microservice
     #[arg(long)]
-    microservice_socket: SocketAddr,
+    microservice_socket: Endpoint,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -35,11 +38,11 @@ impl std::fmt::Display for Message {
 }
 
 struct MessageServer {
-    microservice_socket: SocketAddr,
+    microservice_socket: Endpoint,
 }
 
 impl MessageServer {
-    fn new(microservice_socket: SocketAddr) -> Self {
+    fn new(microservice_socket: Endpoint) -> Self {
         MessageServer {
             microservice_socket,
         }
@@ -64,20 +67,18 @@ async fn message(
     State(app_state): State<Arc<MessageServer>>,
     Json(payload): Json<Message>,
 ) -> StatusCode {
-    let Ok(matrix_client) = get_microservice_client(app_state.microservice_socket).await else {
+    let Ok(mut client) =
+        MatrixRoomServerClient::connect(app_state.microservice_socket.to_owned()).await
+    else {
         return StatusCode::INTERNAL_SERVER_ERROR;
     };
-    match matrix_client
-        .send(tarpc::context::current(), payload.to_string())
-        .await
-    {
-        Ok(Ok(_)) => StatusCode::OK,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
-    }
-}
 
-async fn get_microservice_client(socket: SocketAddr) -> anyhow::Result<MatrixRoomServerClient> {
-    let mut transport = tarpc::serde_transport::tcp::connect(socket, Bincode::default);
-    transport.config_mut().max_frame_length(usize::MAX);
-    Ok(MatrixRoomServerClient::new(tarpc::client::Config::default(), transport.await?).spawn())
+    let request = tonic::Request::new(SendMessage {
+        message: payload.to_string(),
+    });
+
+    match client.send(request).await {
+        Ok(_) => StatusCode::OK,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
