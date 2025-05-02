@@ -1,16 +1,16 @@
 syntax = "proto3";
-package matrix_room_server;
+package matrix_room_bot;
 
-service matrix_room_server {
-    rpc sync_public_keys(PublicKey) returns (PublicKey);
+service matrix_room_bot {
+    rpc sync_public_keys(PublicKeyMessage) returns (PublicKeyMessage);
     rpc load_cipher(EncryptionData) returns (SessionState);
     rpc send(SendMessage) returns (Empty);
     rpc start(Empty) returns (Empty);
     rpc stop(Empty) returns (Empty);
 }
 
-message PublicKey {
-    bytes public_key = 1;
+message PublicKeyMessage {
+    bytes public_key_bytes = 1;
 }
 
 message EncryptionData {

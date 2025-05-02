@@ -1,8 +1,7 @@
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use clap::Parser;
 use matrix_bots::{
-    matrix_room_server::matrix_room_server_client::MatrixRoomServerClient,
-    matrix_room_server::SendMessage,
+    matrix_room_bot::matrix_room_bot_client::MatrixRoomBotClient, matrix_room_bot::SendMessage,
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
@@ -68,7 +67,7 @@ async fn message(
     Json(payload): Json<Message>,
 ) -> StatusCode {
     let Ok(mut client) =
-        MatrixRoomServerClient::connect(app_state.microservice_socket.to_owned()).await
+        MatrixRoomBotClient::connect(app_state.microservice_socket.to_owned()).await
     else {
         return StatusCode::INTERNAL_SERVER_ERROR;
     };

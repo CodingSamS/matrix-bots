@@ -1,10 +1,10 @@
 use clap::Parser;
 use crypto_box::{
     aead::{Aead, AeadCore, OsRng},
-    ChaChaBox, SecretKey,
+    ChaChaBox, PublicKey, SecretKey,
 };
-use matrix_bots::matrix_room_server::{
-    matrix_room_server_client::MatrixRoomServerClient, Empty, EncryptionData, PublicKey,
+use matrix_bots::matrix_room_bot::{
+    matrix_room_bot_client::MatrixRoomBotClient, Empty, EncryptionData, PublicKeyMessage,
 };
 use tonic::transport::Endpoint;
 
@@ -22,7 +22,7 @@ struct Args {
 }
 
 async fn start(args: &Args, restart: bool) -> anyhow::Result<()> {
-    let mut client = MatrixRoomServerClient::connect(args.server_addr.to_owned()).await?;
+    let mut client = MatrixRoomBotClient::connect(args.server_addr.to_owned()).await?;
 
     if restart {
         // stop the server first and wait a duration in order to let systemd restart it
@@ -30,7 +30,7 @@ async fn start(args: &Args, restart: bool) -> anyhow::Result<()> {
 
         tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
 
-        client = MatrixRoomServerClient::connect(args.server_addr.to_owned()).await?;
+        client = MatrixRoomBotClient::connect(args.server_addr.to_owned()).await?;
     }
 
     // generate random key
@@ -38,12 +38,12 @@ async fn start(args: &Args, restart: bool) -> anyhow::Result<()> {
     let alice_public_key = alice_secret_key.public_key();
 
     let response = client
-        .sync_public_keys(PublicKey {
-            public_key: alice_public_key.as_bytes().into(),
+        .sync_public_keys(PublicKeyMessage {
+            public_key_bytes: alice_public_key.as_bytes().into(),
         })
         .await?;
 
-    let bob_public_key = crypto_box::PublicKey::from_slice(&response.into_inner().public_key)?;
+    let bob_public_key = PublicKey::from_slice(&response.into_inner().public_key_bytes)?;
 
     let alice_box = ChaChaBox::new(&bob_public_key, &alice_secret_key);
     let nonce = ChaChaBox::generate_nonce(&mut OsRng);

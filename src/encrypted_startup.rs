@@ -25,7 +25,7 @@ impl EncryptedStartupHelper {
     }
 
     pub async fn decrypt(
-        self,
+        &self,
         ciphertext: Vec<u8>,
         nonce: Vec<u8>,
     ) -> Result<[u8; 32], &'static str> {

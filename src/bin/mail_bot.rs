@@ -3,7 +3,7 @@ use clap::Parser;
 use log::{debug, error, info, warn};
 use matrix_bots::{
     mail_server::listen_to_mail_socket_and_return_mail_string,
-    matrix_room_server::{matrix_room_server_client::MatrixRoomServerClient, SendMessage},
+    matrix_room_bot::{matrix_room_bot_client::MatrixRoomBotClient, SendMessage},
 };
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -64,7 +64,7 @@ async fn mail_server(
         bail!("binding socket failed")
     };
 
-    let mut client = MatrixRoomServerClient::connect(microservice_socket.to_owned()).await?;
+    let mut client = MatrixRoomBotClient::connect(microservice_socket.to_owned()).await?;
 
     while let Ok((stream, _)) = socket.accept().await {
         match listen_to_mail_socket_and_return_mail_string(
@@ -86,7 +86,7 @@ async fn mail_server(
                     _ => {
                         info!("Sending failed. Rebuilding the client and trying again");
                         client =
-                            MatrixRoomServerClient::connect(microservice_socket.to_owned()).await?;
+                            MatrixRoomBotClient::connect(microservice_socket.to_owned()).await?;
                         match client.send(SendMessage { message }).await {
                             Ok(_) => info!("2nd try of sending successful"),
                             _ => error!("sending message failed"),

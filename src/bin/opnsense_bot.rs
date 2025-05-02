@@ -1,8 +1,7 @@
 use anyhow::bail;
 use clap::Parser;
 use matrix_bots::{
-    matrix_room_server::matrix_room_server_client::MatrixRoomServerClient,
-    matrix_room_server::SendMessage,
+    matrix_room_bot::matrix_room_bot_client::MatrixRoomBotClient, matrix_room_bot::SendMessage,
 };
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -73,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
             let response_json: Response = serde_json::from_str(&response.text().await?)?;
 
             let mut client =
-                MatrixRoomServerClient::connect(args.microservice_socket.to_owned()).await?;
+                MatrixRoomBotClient::connect(args.microservice_socket.to_owned()).await?;
 
             let request = tonic::Request::new(SendMessage {
                 message: response_json.to_string(),
